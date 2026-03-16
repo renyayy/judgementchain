@@ -1,0 +1,6 @@
+[tools]
+bun = "latest"
+rust = "latest"
+
+[tasks]
+doctor = "bun tauri info"
