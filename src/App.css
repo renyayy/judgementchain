@@ -110,14 +110,40 @@ body {
 
 /* File Tree */
 .file-tree {
-  width: var(--sidebar-width);
-  min-width: var(--sidebar-width);
   background: var(--bg-secondary);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   overflow: hidden;
   flex-shrink: 0;
+  position: relative;
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+}
+
+.file-tree-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 10;
+}
+
+.file-tree-resize-handle:hover,
+.file-tree-resize-handle:active {
+  background: var(--accent);
+  opacity: 0.5;
+}
+
+/* リサイズ中にテキスト選択を防ぐ */
+body.resizing,
+body.resizing * {
+  user-select: none !important;
+  cursor: col-resize !important;
 }
 
 .file-tree-header {
@@ -135,6 +161,38 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.8px;
   color: var(--text-secondary);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-tree-title:hover {
+  color: var(--text-primary);
+}
+
+/* コピー完了フラッシュ */
+.copy-flash {
+  position: absolute;
+  top: 36px;
+  left: 8px;
+  right: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  text-align: center;
+  padding: 4px 8px;
+  border-radius: 4px;
+  z-index: 100;
+  animation: flash-in-out 1.5s ease forwards;
+  pointer-events: none;
+}
+
+@keyframes flash-in-out {
+  0%   { opacity: 0; transform: translateY(-4px); }
+  15%  { opacity: 1; transform: translateY(0); }
+  75%  { opacity: 1; }
+  100% { opacity: 0; }
 }
 
 .file-tree-new-btn {
@@ -224,6 +282,10 @@ body {
   transition: background 0.1s;
   position: relative;
   min-height: 24px;
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
 }
 
 .file-node:hover {
@@ -257,6 +319,10 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
 }
 
 .file-action-btn {

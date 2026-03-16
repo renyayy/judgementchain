@@ -1,10 +1,12 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import type { FileEntry } from "../types";
 
 interface FileTreeProps {
   files: FileEntry[];
   selectedPath: string | null;
   forceExpanded: boolean | null;
+  vaultName: string;
+  vaultPath: string;
   onSelect: (path: string) => void;
   onCreate: (path: string) => void;
   onDelete: (path: string) => void;
@@ -29,7 +31,8 @@ function FileNode({ entry, depth, selectedPath, forceExpanded, onSelect, onDelet
     }
   }, [forceExpanded]);
 
-  const handleClick = () => {
+  const handleClick = (e: React.MouseEvent) => {
+    e.preventDefault();
     if (entry.is_dir) {
       setExpanded((prev) => !prev);
     } else {
@@ -76,7 +79,7 @@ function FileNode({ entry, depth, selectedPath, forceExpanded, onSelect, onDelet
   );
 }
 
-export function FileTree({ files, selectedPath, forceExpanded, onSelect, onCreate, onDelete }: FileTreeProps) {
+export function FileTree({ files, selectedPath, forceExpanded, vaultName, vaultPath, onSelect, onCreate, onDelete }: FileTreeProps) {
   const [newFileName, setNewFileName] = useState("");
   const [showNewInput, setShowNewInput] = useState(false);
 
@@ -95,10 +98,53 @@ export function FileTree({ files, selectedPath, forceExpanded, onSelect, onCreat
     return () => window.removeEventListener("nomos:new-note", handler);
   }, []);
 
+  const [copied, setCopied] = useState(false);
+  const [width, setWidth] = useState(240);
+  const isDragging = useRef(false);
+  const startX = useRef(0);
+  const startWidth = useRef(0);
+
+  const handleResizeStart = (e: React.MouseEvent) => {
+    e.preventDefault();
+    isDragging.current = true;
+    startX.current = e.clientX;
+    startWidth.current = width;
+    document.body.classList.add("resizing");
+
+    const onMouseMove = (e: MouseEvent) => {
+      if (!isDragging.current) return;
+      const next = Math.max(160, Math.min(480, startWidth.current + e.clientX - startX.current));
+      setWidth(next);
+    };
+    const onMouseUp = () => {
+      isDragging.current = false;
+      document.body.classList.remove("resizing");
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  };
+
+  const handleCopyVaultPath = () => {
+    navigator.clipboard.writeText(vaultPath).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+
   return (
-    <aside className="file-tree">
+    <aside className="file-tree" style={{ width, minWidth: width }}>
+      <div className="file-tree-resize-handle" onMouseDown={handleResizeStart} />
+      {copied && <div className="copy-flash">コピーしました</div>}
       <div className="file-tree-header">
-        <span className="file-tree-title">Files</span>
+        <span
+          className="file-tree-title"
+          onClick={handleCopyVaultPath}
+          title={vaultPath}
+        >
+          {vaultName || "Files"}
+        </span>
         <button className="file-tree-new-btn" onClick={() => setShowNewInput(true)} title="新規ノート">＋</button>
       </div>
 

@@ -33,12 +33,19 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [marginOpen, setMarginOpen] = useState(true);
   const [folderExpandSignal, setFolderExpandSignal] = useState<boolean | null>(null);
+  const [vaultName, setVaultName] = useState("");
+  const [vaultPath, setVaultPath] = useState("");
 
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Initial load
   useEffect(() => {
     listFiles();
+    invoke<{ vault: { path: string } }>("get_config").then((cfg) => {
+      const p = cfg.vault.path.replace(/\/$/, "");
+      setVaultPath(p);
+      setVaultName(p.split("/").pop() ?? p);
+    });
   }, [listFiles]);
 
   const handleSelectFile = useCallback(async (path: string) => {
@@ -127,6 +134,9 @@ function App() {
     setSavedContent("");
     setAnnotations([]);
     setBacklinks([]);
+    const p1 = dir.replace(/\/$/, "");
+    setVaultPath(p1);
+    setVaultName(p1.split("/").pop() ?? p1);
     await listFiles();
   }, [listFiles]);
 
@@ -154,6 +164,9 @@ function App() {
     setSavedContent("");
     setAnnotations([]);
     setBacklinks([]);
+    const p2 = dir.replace(/\/$/, "");
+    setVaultPath(p2);
+    setVaultName(p2.split("/").pop() ?? p2);
     await listFiles();
   }, [listFiles]);
 
@@ -195,6 +208,8 @@ function App() {
             files={files}
             selectedPath={selectedPath}
             forceExpanded={folderExpandSignal}
+            vaultName={vaultName}
+            vaultPath={vaultPath}
             onSelect={handleSelectFile}
             onCreate={handleCreate}
             onDelete={handleDelete}
