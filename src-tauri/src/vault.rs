@@ -54,9 +54,13 @@ fn build_tree(dir: &std::path::Path) -> Result<Vec<FileEntry>, String> {
                 return None;
             }
 
-            // ディレクトリでもファイルでも .md 以外のファイルはスキップ
-            if !is_dir && path.extension().and_then(|e| e.to_str()) != Some("md") {
-                return None;
+            // 対応する拡張子以外はスキップ
+            const ALLOWED_EXTS: &[&str] = &["md", "png", "jpg", "jpeg", "gif", "webp", "svg", "pdf"];
+            if !is_dir {
+                let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                if !ALLOWED_EXTS.contains(&ext) {
+                    return None;
+                }
             }
 
             let modified_at = entry.metadata().ok()

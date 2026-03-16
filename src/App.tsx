@@ -6,6 +6,7 @@ import { Editor } from "./components/Editor";
 import { MarginPanel } from "./components/MarginPanel";
 import { useVault } from "./hooks/useVault";
 import { useAppMenu } from "./hooks/useAppMenu";
+import { isViewableFile } from "./components/FileViewer";
 import type { MarginAnnotation, Backlink } from "./types";
 import "./App.css";
 
@@ -45,6 +46,17 @@ function App() {
       await saveFile(selectedPath, content);
     }
 
+    // 画像・PDF はファイル読み込み不要、パスだけセット
+    if (isViewableFile(path)) {
+      setSelectedPath(path);
+      setContent("");
+      setSavedContent("");
+      setIsDirty(false);
+      setAnnotations([]);
+      setBacklinks([]);
+      return;
+    }
+
     const note = await openFile(path);
     if (note) {
       setSelectedPath(path);
@@ -52,7 +64,6 @@ function App() {
       setSavedContent(note.content);
       setIsDirty(false);
 
-      // Load margin data
       const [annots, bls] = await Promise.all([
         getMarginAnnotations(path),
         getBacklinks(path),

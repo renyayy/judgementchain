@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { FileViewer, isViewableFile } from "./FileViewer";
 import CodeMirror from "@uiw/react-codemirror";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
@@ -53,6 +54,20 @@ export function Editor({ content, filePath, isDirty, onChange }: EditorProps) {
         <div className="editor-empty-content">
           <p>ファイルを選択してください</p>
           <p className="editor-empty-hint">左のパネルからノートを選択するか、新規作成してください</p>
+        </div>
+      </div>
+    );
+  }
+
+  // 画像・PDF はビューアで表示
+  if (isViewableFile(filePath)) {
+    return (
+      <div className="editor-container">
+        <div className="editor-header">
+          <span className="editor-filename">{filePath.split("/").pop()}</span>
+        </div>
+        <div className="editor-body editor-body--preview">
+          <FileViewer filePath={filePath} />
         </div>
       </div>
     );
