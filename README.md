@@ -1,7 +1,7 @@
-# JudgementChain
+# Tauri + React + Typescript
 
-JPHack (Google プログラミングコンテスト) 開発リポジトリ
+This template should help get you started developing with Tauri, React and Typescript in Vite.
 
-## コンテスト情報
+## Recommended IDE Setup
 
-- **公式サイト**: https://gdsc-jp.connpass.com/event/378883/
+- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
