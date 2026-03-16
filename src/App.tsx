@@ -4,8 +4,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { FileTree } from "./components/FileTree";
 import { Editor } from "./components/Editor";
 import { MarginPanel } from "./components/MarginPanel";
+import { GitPanel } from "./components/GitPanel";
 import { useVault } from "./hooks/useVault";
 import { useAppMenu } from "./hooks/useAppMenu";
+import { useGit } from "./hooks/useGit";
 import { isViewableFile } from "./components/FileViewer";
 import type { MarginAnnotation, Backlink } from "./types";
 import "./App.css";
@@ -32,6 +34,10 @@ function App() {
   const [backlinks, setBacklinks] = useState<Backlink[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [marginOpen, setMarginOpen] = useState(true);
+  const [gitOpen, setGitOpen] = useState(false);
+
+  const { status: gitStatus, commits: gitCommits, refresh: refreshGit,
+    stage: gitStage, unstage: gitUnstage, commit: gitCommit, initRepo: gitInit } = useGit();
   const [folderExpandSignal, setFolderExpandSignal] = useState<boolean | null>(null);
   const [vaultName, setVaultName] = useState("");
   const [vaultPath, setVaultPath] = useState("");
@@ -46,6 +52,7 @@ function App() {
       setVaultPath(p);
       setVaultName(p.split("/").pop() ?? p);
     });
+    refreshGit();
   }, [listFiles]);
 
   const handleSelectFile = useCallback(async (path: string) => {
@@ -92,9 +99,10 @@ function App() {
         setSavedContent(value);
         setIsDirty(false);
 
-        // Refresh annotations after save
+        // Refresh annotations and git status after save
         const annots = await getMarginAnnotations(selectedPath);
         setAnnotations(annots);
+        refreshGit();
       }
     }, AUTO_SAVE_DELAY);
   }, [savedContent, selectedPath, saveFile, getMarginAnnotations]);
@@ -193,6 +201,13 @@ function App() {
         <div className="app-header-right">
           {isDirty && <span className="save-indicator">未保存</span>}
           <button
+            className={`header-btn ${gitOpen ? "active" : ""}`}
+            onClick={() => setGitOpen((v) => !v)}
+            title="Git"
+          >
+            ⎇
+          </button>
+          <button
             className="header-btn"
             onClick={() => setMarginOpen((v) => !v)}
             title="Judgement Brain"
@@ -210,6 +225,7 @@ function App() {
             forceExpanded={folderExpandSignal}
             vaultName={vaultName}
             vaultPath={vaultPath}
+            gitFiles={gitStatus.files}
             onSelect={handleSelectFile}
             onCreate={handleCreate}
             onDelete={handleDelete}
@@ -224,6 +240,18 @@ function App() {
             onChange={handleEditorChange}
           />
         </main>
+
+        {gitOpen && (
+          <GitPanel
+            status={gitStatus}
+            commits={gitCommits}
+            onRefresh={refreshGit}
+            onStage={gitStage}
+            onUnstage={gitUnstage}
+            onCommit={gitCommit}
+            onInit={gitInit}
+          />
+        )}
 
         {marginOpen && (
           <MarginPanel

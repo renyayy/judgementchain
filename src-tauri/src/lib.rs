@@ -2,6 +2,7 @@ mod config;
 mod database;
 mod vault;
 mod commands;
+mod git;
 
 use std::sync::{Arc, RwLock};
 use config::Config;
@@ -49,6 +50,12 @@ pub fn run() {
             commands::get_related_notes,
             commands::get_diff,
             commands::get_history,
+            commands::git_repo_status,
+            commands::git_stage,
+            commands::git_unstage,
+            commands::git_commit,
+            commands::git_log,
+            commands::git_init,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

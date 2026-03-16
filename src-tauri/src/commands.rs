@@ -290,6 +290,64 @@ pub async fn get_related_notes(path: String, limit: Option<usize>, state: State<
 }
 
 #[tauri::command]
+pub async fn git_repo_status(state: State<'_, AppState>) -> Result<crate::git::GitStatus, String> {
+    let vault_path = {
+        let config = state.config.read().map_err(|e| format!("Config lock error: {}", e))?;
+        config.get_vault_path().to_string_lossy().to_string()
+    };
+    Ok(crate::git::get_repo_status(&vault_path))
+}
+
+#[tauri::command]
+pub async fn git_stage(file_path: String, state: State<'_, AppState>) -> Result<bool, String> {
+    let vault_path = {
+        let config = state.config.read().map_err(|e| format!("Config lock error: {}", e))?;
+        config.get_vault_path().to_string_lossy().to_string()
+    };
+    crate::git::stage_file(&vault_path, &file_path)?;
+    Ok(true)
+}
+
+#[tauri::command]
+pub async fn git_unstage(file_path: String, state: State<'_, AppState>) -> Result<bool, String> {
+    let vault_path = {
+        let config = state.config.read().map_err(|e| format!("Config lock error: {}", e))?;
+        config.get_vault_path().to_string_lossy().to_string()
+    };
+    crate::git::unstage_file(&vault_path, &file_path)?;
+    Ok(true)
+}
+
+#[tauri::command]
+pub async fn git_commit(message: String, state: State<'_, AppState>) -> Result<bool, String> {
+    let vault_path = {
+        let config = state.config.read().map_err(|e| format!("Config lock error: {}", e))?;
+        config.get_vault_path().to_string_lossy().to_string()
+    };
+    crate::git::commit_changes(&vault_path, &message)?;
+    Ok(true)
+}
+
+#[tauri::command]
+pub async fn git_log(limit: Option<usize>, state: State<'_, AppState>) -> Result<Vec<crate::git::GitCommit>, String> {
+    let vault_path = {
+        let config = state.config.read().map_err(|e| format!("Config lock error: {}", e))?;
+        config.get_vault_path().to_string_lossy().to_string()
+    };
+    Ok(crate::git::get_log(&vault_path, limit.unwrap_or(50)))
+}
+
+#[tauri::command]
+pub async fn git_init(state: State<'_, AppState>) -> Result<bool, String> {
+    let vault_path = {
+        let config = state.config.read().map_err(|e| format!("Config lock error: {}", e))?;
+        config.get_vault_path().to_string_lossy().to_string()
+    };
+    crate::git::init_repo(&vault_path)?;
+    Ok(true)
+}
+
+#[tauri::command]
 pub async fn get_diff(path: String, state: State<'_, AppState>) -> Result<String, String> {
     let git_enabled = {
         let config = state.config.read().map_err(|e| format!("Config lock error: {}", e))?;

@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import type { FileEntry } from "../types";
+import type { FileEntry, GitFileStatus } from "../types";
 
 interface FileTreeProps {
   files: FileEntry[];
@@ -7,6 +7,7 @@ interface FileTreeProps {
   forceExpanded: boolean | null;
   vaultName: string;
   vaultPath: string;
+  gitFiles: GitFileStatus[];
   onSelect: (path: string) => void;
   onCreate: (path: string) => void;
   onDelete: (path: string) => void;
@@ -17,13 +18,25 @@ interface FileNodeProps {
   depth: number;
   selectedPath: string | null;
   forceExpanded: boolean | null;
+  gitFiles: GitFileStatus[];
   onSelect: (path: string) => void;
   onDelete: (path: string) => void;
 }
 
-function FileNode({ entry, depth, selectedPath, forceExpanded, onSelect, onDelete }: FileNodeProps) {
+function gitStatusColor(status: string): string {
+  if (status === "M") return "#f78166";
+  if (status === "A") return "#3fb950";
+  if (status === "D") return "#ff7b72";
+  return "#8b949e";
+}
+
+function FileNode({ entry, depth, selectedPath, forceExpanded, gitFiles, onSelect, onDelete }: FileNodeProps) {
   const [expanded, setExpanded] = useState(true);
   const isSelected = selectedPath === entry.path;
+
+  const gitEntry = entry.is_dir
+    ? gitFiles.find((f) => f.path.startsWith(entry.path + "/"))
+    : gitFiles.find((f) => f.path === entry.path);
 
   useEffect(() => {
     if (forceExpanded !== null) {
@@ -58,6 +71,15 @@ function FileNode({ entry, depth, selectedPath, forceExpanded, onSelect, onDelet
           {entry.is_dir ? (expanded ? "▾" : "▸") : "○"}
         </span>
         <span className="file-name">{entry.name}</span>
+        {gitEntry && (
+          <span
+            className="git-status-dot"
+            style={{ color: gitStatusColor(gitEntry.status) }}
+            title={gitEntry.staged ? `staged: ${gitEntry.status}` : `unstaged: ${gitEntry.status}`}
+          >
+            {gitEntry.status}
+          </span>
+        )}
         {!entry.is_dir && (
           <button className="file-action-btn" onClick={handleDelete} title="削除">
             ✕
@@ -71,6 +93,7 @@ function FileNode({ entry, depth, selectedPath, forceExpanded, onSelect, onDelet
           depth={depth + 1}
           selectedPath={selectedPath}
           forceExpanded={forceExpanded}
+          gitFiles={gitFiles}
           onSelect={onSelect}
           onDelete={onDelete}
         />
@@ -79,7 +102,7 @@ function FileNode({ entry, depth, selectedPath, forceExpanded, onSelect, onDelet
   );
 }
 
-export function FileTree({ files, selectedPath, forceExpanded, vaultName, vaultPath, onSelect, onCreate, onDelete }: FileTreeProps) {
+export function FileTree({ files, selectedPath, forceExpanded, vaultName, vaultPath, gitFiles, onSelect, onCreate, onDelete }: FileTreeProps) {
   const [newFileName, setNewFileName] = useState("");
   const [showNewInput, setShowNewInput] = useState(false);
 
@@ -175,6 +198,7 @@ export function FileTree({ files, selectedPath, forceExpanded, vaultName, vaultP
             depth={0}
             selectedPath={selectedPath}
             forceExpanded={forceExpanded}
+            gitFiles={gitFiles}
             onSelect={onSelect}
             onDelete={onDelete}
           />

@@ -32,3 +32,24 @@ export interface Config {
     enabled: boolean;
   };
 }
+
+export interface GitFileStatus {
+  path: string;
+  status: string; // M, A, D, ?, R
+  staged: boolean;
+}
+
+export interface GitStatus {
+  is_repo: boolean;
+  branch: string;
+  files: GitFileStatus[];
+}
+
+export interface GitCommit {
+  hash: string;
+  short_hash: string;
+  parents: string[];
+  message: string;
+  timestamp: number;
+  refs: string;
+}
