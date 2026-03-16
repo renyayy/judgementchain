@@ -31,7 +31,7 @@ function gitStatusColor(status: string): string {
 }
 
 function FileNode({ entry, depth, selectedPath, forceExpanded, gitFiles, onSelect, onDelete }: FileNodeProps) {
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   const isSelected = selectedPath === entry.path;
 
   const gitEntry = entry.is_dir

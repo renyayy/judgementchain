@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { GitStatus, GitCommit } from "../types";
 
 // ---- Graph layout --------------------------------------------------------
@@ -156,6 +156,10 @@ type Tab = "changes" | "history";
 export function GitPanel({ status, commits, onRefresh, onStage, onUnstage, onCommit, onInit }: GitPanelProps) {
   const [tab, setTab] = useState<Tab>("changes");
   const [commitMsg, setCommitMsg] = useState("");
+  const [width, setWidth] = useState(240);
+  const isDragging = useRef(false);
+  const startX = useRef(0);
+  const startWidth = useRef(0);
 
   useEffect(() => {
     onRefresh();
@@ -171,6 +175,28 @@ export function GitPanel({ status, commits, onRefresh, onStage, onUnstage, onCom
     setCommitMsg("");
   };
 
+  const handleResizeStart = (e: React.MouseEvent) => {
+    e.preventDefault();
+    isDragging.current = true;
+    startX.current = e.clientX;
+    startWidth.current = width;
+    document.body.classList.add("resizing");
+
+    const onMouseMove = (e: MouseEvent) => {
+      if (!isDragging.current) return;
+      const next = Math.max(180, Math.min(480, startWidth.current - (e.clientX - startX.current)));
+      setWidth(next);
+    };
+    const onMouseUp = () => {
+      isDragging.current = false;
+      document.body.classList.remove("resizing");
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  };
+
   const shortPath = (p: string) => p.split("/").pop() ?? p;
   const statusColor = (s: string) => {
     if (s === "M") return "#f78166";
@@ -180,7 +206,8 @@ export function GitPanel({ status, commits, onRefresh, onStage, onUnstage, onCom
   };
 
   return (
-    <div className="git-panel">
+    <div className="git-panel" style={{ width, minWidth: width }}>
+      <div className="git-panel-resize-handle" onMouseDown={handleResizeStart} />
       <div className="git-panel-header">
         <span className="git-panel-title">Git</span>
         {status.is_repo && (

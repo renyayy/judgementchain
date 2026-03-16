@@ -30,6 +30,10 @@ html, body, #root {
   height: 100%;
   width: 100%;
   overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
 }
 
 body {
@@ -413,6 +417,10 @@ body.resizing * {
 
 .editor-body .cm-editor {
   height: 100%;
+  user-select: text;
+  -webkit-user-select: text;
+  -moz-user-select: text;
+  -ms-user-select: text;
 }
 
 /* View mode toggle */
@@ -520,6 +528,10 @@ body.resizing * {
   font-family: var(--font-ui);
   font-size: 15px;
   line-height: 1.8;
+  user-select: text;
+  -webkit-user-select: text;
+  -moz-user-select: text;
+  -ms-user-select: text;
 }
 
 .preview-pane::-webkit-scrollbar {
@@ -661,14 +673,29 @@ body.resizing * {
 
 /* Margin Panel */
 .margin-panel {
-  width: var(--margin-width);
-  min-width: var(--margin-width);
   background: var(--bg-secondary);
   border-left: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   overflow-y: auto;
   flex-shrink: 0;
+  position: relative;
+}
+
+.margin-panel-resize-handle {
+  position: absolute;
+  top: 0;
+  left: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 10;
+}
+
+.margin-panel-resize-handle:hover,
+.margin-panel-resize-handle:active {
+  background: var(--accent);
+  opacity: 0.5;
 }
 
 .margin-panel::-webkit-scrollbar {
@@ -800,8 +827,6 @@ body.resizing * {
 
 /* ---- Git Panel ---- */
 .git-panel {
-  width: 240px;
-  min-width: 240px;
   background: var(--bg-secondary);
   border-left: 1px solid var(--border);
   display: flex;
@@ -809,6 +834,23 @@ body.resizing * {
   overflow: hidden;
   font-size: 12px;
   color: var(--text-primary);
+  position: relative;
+}
+
+.git-panel-resize-handle {
+  position: absolute;
+  top: 0;
+  left: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 10;
+}
+
+.git-panel-resize-handle:hover,
+.git-panel-resize-handle:active {
+  background: var(--accent);
+  opacity: 0.5;
 }
 
 .git-panel-header {
