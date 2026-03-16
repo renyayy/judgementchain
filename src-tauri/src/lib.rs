@@ -47,6 +47,7 @@ pub fn run() {
             commands::save_file,
             commands::list_files,
             commands::create_file,
+            commands::create_dir,
             commands::delete_file,
             commands::rename_file,
             commands::resolve_wikilink,

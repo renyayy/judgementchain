@@ -47,6 +47,17 @@ export function useVault() {
     }
   }, [listFiles]);
 
+  const createDir = useCallback(async (path: string): Promise<boolean> => {
+    try {
+      const ok = await invoke<boolean>("create_dir", { path });
+      if (ok) await listFiles();
+      return ok;
+    } catch (e) {
+      console.error("create_dir error:", e);
+      return false;
+    }
+  }, [listFiles]);
+
   const deleteFile = useCallback(async (path: string): Promise<boolean> => {
     try {
       const ok = await invoke<boolean>("delete_file", { path });
@@ -84,6 +95,7 @@ export function useVault() {
     openFile,
     saveFile,
     createFile,
+    createDir,
     deleteFile,
     getMarginAnnotations,
     getBacklinks,

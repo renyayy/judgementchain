@@ -222,6 +222,27 @@ pub async fn create_file(path: String, content: Option<String>, state: State<'_,
 }
 
 #[tauri::command]
+pub async fn create_dir(path: String, state: State<'_, AppState>) -> Result<bool, String> {
+    let vault_path = {
+        let config = state.config.read().map_err(|e| format!("Config lock error: {}", e))?;
+        config.get_vault_path().to_string_lossy().to_string()
+    };
+
+    let full_path = if path.starts_with('/') || path.starts_with('~') {
+        path.clone()
+    } else {
+        format!("{}/{}", vault_path, path)
+    };
+
+    crate::vault::create_directory(&full_path)?;
+
+    // Log activity
+    let _ = state.db.log_activity(&full_path, "create_dir", None);
+
+    Ok(true)
+}
+
+#[tauri::command]
 pub async fn delete_file(path: String, state: State<'_, AppState>) -> Result<bool, String> {
     let (vault_path, trash_path) = {
         let config = state.config.read().map_err(|e| format!("Config lock error: {}", e))?;

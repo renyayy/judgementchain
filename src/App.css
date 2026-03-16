@@ -257,8 +257,25 @@ body.resizing * {
   border-bottom: 1px solid var(--border);
 }
 
+.new-file-input.inline {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-bottom: none;
+  margin: 1px 4px;
+}
+
+.new-file-input.inline .file-icon {
+  font-size: 10px;
+  width: 12px;
+  text-align: center;
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
 .new-file-input input {
-  width: 100%;
+  flex: 1;
   background: var(--bg-tertiary);
   border: 1px solid var(--accent);
   color: var(--text-primary);
@@ -267,6 +284,10 @@ body.resizing * {
   font-size: 12px;
   outline: none;
   font-family: var(--font-mono);
+}
+
+.new-file-input:not(.inline) input {
+  width: 100%;
 }
 
 .file-tree-list {
@@ -312,6 +333,12 @@ body.resizing * {
 .file-node.selected {
   background: var(--bg-selected);
   color: #fff;
+}
+
+.file-node.dir-selected {
+  background: var(--bg-hover);
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
 }
 
 .file-node.dir {

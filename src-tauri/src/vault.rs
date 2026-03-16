@@ -168,6 +168,19 @@ pub fn create_note(path: &str, content: Option<&str>) -> Result<(), String> {
     Ok(())
 }
 
+pub fn create_directory(path: &str) -> Result<(), String> {
+    let p = crate::config::expand_tilde(path);
+
+    if p.exists() {
+        return Err(format!("Directory already exists: {}", p.display()));
+    }
+
+    std::fs::create_dir_all(&p)
+        .map_err(|e| format!("Failed to create directory: {}", e))?;
+
+    Ok(())
+}
+
 pub fn delete_note(path: &str, trash_path: &str) -> Result<(), String> {
     let src = crate::config::expand_tilde(path);
     let trash = crate::config::expand_tilde(trash_path);

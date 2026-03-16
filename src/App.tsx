@@ -22,6 +22,7 @@ function App() {
     openFile,
     saveFile,
     createFile,
+    createDir,
     deleteFile,
     getMarginAnnotations,
     getBacklinks,
@@ -121,6 +122,11 @@ function App() {
     await createFile(name);
     await listFiles();
   }, [createFile, listFiles]);
+
+  const handleCreateDir = useCallback(async (name: string) => {
+    await createDir(name);
+    await listFiles();
+  }, [createDir, listFiles]);
 
   const handleDelete = useCallback(async (path: string) => {
     await deleteFile(path);
@@ -238,6 +244,7 @@ function App() {
             gitFiles={gitStatus.files}
             onSelect={handleSelectFile}
             onCreate={handleCreate}
+            onCreateDir={handleCreateDir}
             onDelete={handleDelete}
           />
         )}
