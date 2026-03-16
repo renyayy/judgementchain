@@ -3,6 +3,8 @@ mod database;
 mod vault;
 mod commands;
 mod git;
+mod watcher;
+mod ai;
 
 use std::sync::{Arc, RwLock};
 use config::Config;
@@ -32,6 +34,14 @@ pub fn run() {
         .manage(state)
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            // ファイル変更監視を起動（configを直接ロードして vault path を取得）
+            let app_handle = app.handle().clone();
+            let config = crate::config::Config::load();
+            let vault_path = config.get_vault_path().to_string_lossy().to_string();
+            crate::watcher::start(app_handle, vault_path);
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::open_file,
             commands::save_file,
@@ -56,6 +66,8 @@ pub fn run() {
             commands::git_commit,
             commands::git_log,
             commands::git_init,
+            commands::embed_note,
+            commands::get_similar_notes_for_margin,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { FileViewer, isViewableFile } from "./FileViewer";
 import CodeMirror from "@uiw/react-codemirror";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
@@ -9,6 +9,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import "highlight.js/styles/github-dark.css";
+import { wikilinkPlugin, wikilinkClickHandler } from "../extensions/wikilinks";
 
 type ViewMode = "edit" | "split" | "preview";
 
@@ -17,6 +18,7 @@ interface EditorProps {
   filePath: string | null;
   isDirty: boolean;
   onChange: (value: string) => void;
+  onNavigate?: (link: string) => void;
 }
 
 const editorTheme = EditorView.theme({
@@ -39,13 +41,18 @@ const editorTheme = EditorView.theme({
   },
 });
 
-const extensions = [
+const baseExtensions = [
   markdown({ base: markdownLanguage, codeLanguages: languages }),
   editorTheme,
   EditorView.lineWrapping,
+  wikilinkPlugin,
 ];
 
-export function Editor({ content, filePath, isDirty, onChange }: EditorProps) {
+export function Editor({ content, filePath, isDirty, onChange, onNavigate }: EditorProps) {
+  const extensions = useMemo(() => [
+    ...baseExtensions,
+    ...(onNavigate ? [wikilinkClickHandler(onNavigate)] : []),
+  ], [onNavigate]);
   const [viewMode, setViewMode] = useState<ViewMode>("edit");
 
   if (!filePath) {

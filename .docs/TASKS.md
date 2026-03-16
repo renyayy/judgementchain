@@ -27,29 +27,29 @@
 
 | ID | Status | Feature | Task | Spec link | Done条件（最小） |
 |---|---|---|---|---|---|
-| T-101 | backlog | nomos-editor-frontend | Tauri v2 + React + CodeMirror 6 の最小起動 | `.kiro/specs/nomos-editor/requirements.md` / `.kiro/specs/nomos-editor/design.md` | ローカルで起動し、プレーンMarkdownを編集できる |
-| T-102 | backlog | nomos-editor-frontend | wikiリンク `[[...]]` のシンタックスハイライトとクリック遷移 | `.kiro/specs/nomos-editor/requirements.md` | `[[note]]` が強調表示され、クリックでノートを開ける |
-| T-103 | backlog | nomos-editor-frontend | BacklinksパネルのUI実装（ダミーデータでOK） | `.kiro/specs/nomos-editor/design.md` | サイドバーにバックリンク一覧が表示される（まだ本物のデータでなくてよい） |
-| T-104 | backlog | nomos-editor-backend | Vault I/O（Markdown読み書き） | `.kiro/specs/nomos-editor/requirements.md` | 指定Vaultからファイルを読み、保存できる |
-| T-105 | backlog | nomos-editor-backend | ファイルツリーAPI（一覧 + 作成 + 削除の最低限） | `.kiro/specs/nomos-editor/requirements.md` | 一覧取得・新規作成・削除（trash移動）がAPI経由で動く |
-| T-106 | backlog | nomos-editor-backend | ファイル変更監視（外部編集を検出） | `.kiro/specs/nomos-editor/requirements.md` / `.kiro/specs/nomos-editor/design.md` | 外部更新を検知し、フロントに通知できる |
+| T-101 | done | nomos-editor-frontend | Tauri v2 + React + CodeMirror 6 の最小起動 | `.kiro/specs/nomos-editor/requirements.md` / `.kiro/specs/nomos-editor/design.md` | ローカルで起動し、プレーンMarkdownを編集できる |
+| T-102 | done | nomos-editor-frontend | wikiリンク `[[...]]` のシンタックスハイライトとクリック遷移 | `.kiro/specs/nomos-editor/requirements.md` | `src/extensions/wikilinks.ts` にMatchDecoratorで実装。クリックでノートを開ける |
+| T-103 | done | nomos-editor-frontend | BacklinksパネルのUI実装 | `.kiro/specs/nomos-editor/design.md` | MarginPanel にバックリンク一覧を表示 |
+| T-104 | done | nomos-editor-backend | Vault I/O（Markdown読み書き） | `.kiro/specs/nomos-editor/requirements.md` | vault.rs で実装済み |
+| T-105 | done | nomos-editor-backend | ファイルツリーAPI（一覧 + 作成 + 削除の最低限） | `.kiro/specs/nomos-editor/requirements.md` | 再帰的ツリー、trash移動、APIすべて実装済み |
+| T-106 | done | nomos-editor-backend | ファイル変更監視（外部編集を検出） | `.kiro/specs/nomos-editor/requirements.md` / `.kiro/specs/nomos-editor/design.md` | `src-tauri/src/watcher.rs` でnotifyクレートを使用。vault:changedイベントで自動リロード |
 
 ### Phase 1 – Infra / Git / Logging（他と並列可）
 
 | ID | Status | Feature | Task | Spec link | Done条件（最小） |
 |---|---|---|---|---|---|
-| T-111 | backlog | nomos-editor-infra | config.toml 読み込みとVault/AI/Git設定の反映 | `.kiro/specs/nomos-editor/requirements.md` / `.kiro/specs/nomos-editor/design.md` | `~/.config/nomos/config.toml` を読み、最低限の設定がアプリに反映される |
-| T-112 | backlog | nomos-editor-infra | Git自動commit（ON/OFF）とcommitメッセージテンプレート | `.kiro/specs/nomos-editor/requirements.md` / `.kiro/specs/nomos-editor/design.md` | 保存時に自動commitされ、設定でOFFにできる |
-| T-113 | backlog | nomos-editor-backend | 行動ログ記録（SQLite: open/edit/close） | `.kiro/specs/nomos-editor/requirements.md` / `.kiro/specs/nomos-editor/design.md` | `activity_log` に操作が非同期で蓄積される |
+| T-111 | done | nomos-editor-infra | config.toml 読み込みとVault/AI/Git設定の反映 | `.kiro/specs/nomos-editor/requirements.md` / `.kiro/specs/nomos-editor/design.md` | `~/.config/nomos/config.toml` から読み込み、デフォルト値あり |
+| T-112 | done | nomos-editor-infra | Git自動commit（ON/OFF）とcommitメッセージテンプレート | `.kiro/specs/nomos-editor/requirements.md` / `.kiro/specs/nomos-editor/design.md` | `save_file`内で`git.auto_commit`フラグを確認し自動commit |
+| T-113 | done | nomos-editor-backend | 行動ログ記録（SQLite: open/edit/close） | `.kiro/specs/nomos-editor/requirements.md` / `.kiro/specs/nomos-editor/design.md` | `activity_log` テーブルに記録済み |
 
 ### Phase 2 – Embedding / 関連ノート（💡）（AI/DB/FEで並列可）
 
 | ID | Status | Feature | Task | Spec link | Done条件（最小） |
 |---|---|---|---|---|---|
-| T-201 | backlog | nomos-editor-ai | Embeddingエンジン実装（nomic-embed-text想定インターフェース） | `.kiro/specs/nomos-editor/requirements.md` / `.kiro/specs/nomos-editor/design.md` | 文字列を渡すとベクトルが返るモジュールがある |
-| T-202 | backlog | nomos-editor-backend | `note_embeddings` テーブルと保存/取得クエリ | `.kiro/specs/nomos-editor/requirements.md` / `.kiro/specs/nomos-editor/design.md` | 指定ファイルのembeddingを保存・取得できる |
-| T-203 | backlog | nomos-editor-backend | 類似ノート検索API（top-k, 閾値指定） | `.kiro/specs/nomos-editor/design.md` | embeddingから類似ノート一覧を返すAPIがある |
-| T-204 | backlog | nomos-editor-frontend | Margin Annotation（💡）のUIコンポーネント | `.kiro/specs/nomos-editor/design.md` | 右マージンに関連ノートのリストを表示できる（擬似データでOK） |
+| T-201 | done | nomos-editor-ai | Embeddingエンジン実装（Ollama/nomic-embed-text） | `.kiro/specs/nomos-editor/requirements.md` / `.kiro/specs/nomos-editor/design.md` | `src-tauri/src/ai.rs` でOllama API呼び出し。未起動時はgraceful degradation |
+| T-202 | done | nomos-editor-backend | `note_embeddings` テーブルと保存/取得クエリ | `.kiro/specs/nomos-editor/requirements.md` / `.kiro/specs/nomos-editor/design.md` | database.rsに実装済み。保存時にバックグラウンドスレッドで自動生成 |
+| T-203 | done | nomos-editor-backend | 類似ノート検索API（top-k, 閾値指定） | `.kiro/specs/nomos-editor/design.md` | `get_similar_notes_for_margin`コマンドで閾値フィルタ済みの類似ノートを返す |
+| T-204 | done | nomos-editor-frontend | Margin Annotation（💡）のUIコンポーネント | `.kiro/specs/nomos-editor/design.md` | MarginPanelに💡アイコン付きで表示。クリックでノートを開ける |
 
 ### Phase 3 – Judgement Brain 本体（⚡📄📊）
 

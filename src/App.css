@@ -39,6 +39,19 @@ body {
   font-size: 13px;
 }
 
+/* Wikilink highlight in CodeMirror */
+.cm-wikilink {
+  color: #58a6ff;
+  text-decoration: underline;
+  text-decoration-color: rgba(88, 166, 255, 0.4);
+  cursor: pointer;
+  border-radius: 2px;
+}
+.cm-wikilink:hover {
+  background: rgba(88, 166, 255, 0.1);
+  text-decoration-color: #58a6ff;
+}
+
 /* App Layout */
 .app {
   display: flex;

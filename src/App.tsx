@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { FileTree } from "./components/FileTree";
 import { Editor } from "./components/Editor";
 import { MarginPanel } from "./components/MarginPanel";
@@ -54,6 +55,15 @@ function App() {
     });
     refreshGit();
   }, [listFiles]);
+
+  // ファイル変更監視（外部編集の自動検出）
+  useEffect(() => {
+    const unlisten = listen("vault:changed", () => {
+      listFiles();
+      refreshGit();
+    });
+    return () => { unlisten.then((f) => f()); };
+  }, [listFiles, refreshGit]);
 
   const handleSelectFile = useCallback(async (path: string) => {
     if (isDirty && selectedPath) {
@@ -238,6 +248,7 @@ function App() {
             filePath={selectedPath}
             isDirty={isDirty}
             onChange={handleEditorChange}
+            onNavigate={handleOpenNote}
           />
         </main>
 

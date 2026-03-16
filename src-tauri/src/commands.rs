@@ -72,10 +72,121 @@ pub async fn save_file(path: String, content: String, state: State<'_, AppState>
     let wikilinks = crate::vault::extract_wikilinks(&content);
     let _ = state.db.store_wikilinks(&full_path, &wikilinks);
 
-    // Compute content hash for embedding tracking
-    let _content_hash = crate::vault::compute_content_hash(&content);
+    // Auto-commit if enabled
+    {
+        let config = state.config.read().map_err(|e| format!("Config lock error: {}", e))?;
+        if config.git.enabled && config.git.auto_commit {
+            let file_name = std::path::Path::new(&full_path)
+                .file_name().and_then(|n| n.to_str()).unwrap_or(&full_path);
+            let msg = config.git.commit_message_template
+                .replace("{action}", "save")
+                .replace("{file}", file_name);
+            let _ = crate::git::stage_file(&vault_path, &full_path);
+            let _ = crate::git::commit_changes(&vault_path, &msg);
+        }
+    }
+
+    // Async embedding (spawn thread, non-blocking)
+    {
+        let config = state.config.read().map_err(|e| format!("Config lock error: {}", e))?;
+        if config.judgement_brain.enabled {
+            let backend = config.ai.backend.clone();
+            let model = config.ai.embedding_model.clone();
+            let db = state.db.clone();
+            let content_hash = crate::vault::compute_content_hash(&content);
+            let path_clone = full_path.clone();
+            let content_clone = content.clone();
+            std::thread::spawn(move || {
+                // Only regenerate if content changed
+                if let Ok(Some(_)) = db.get_embedding(&path_clone) {
+                    // Already have embedding; skip for now (could check hash)
+                }
+                if let Some(embedding) = crate::ai::generate_embedding(&backend, &model, &content_clone) {
+                    let _ = db.store_embedding(&path_clone, &embedding, &content_hash);
+                }
+            });
+        }
+    }
 
     Ok(true)
+}
+
+#[tauri::command]
+pub async fn embed_note(path: String, state: State<'_, AppState>) -> Result<bool, String> {
+    let (vault_path, backend, model, enabled) = {
+        let config = state.config.read().map_err(|e| format!("Config lock error: {}", e))?;
+        (
+            config.get_vault_path().to_string_lossy().to_string(),
+            config.ai.backend.clone(),
+            config.ai.embedding_model.clone(),
+            config.judgement_brain.enabled,
+        )
+    };
+
+    if !enabled { return Ok(false); }
+
+    let full_path = if path.starts_with('/') || path.starts_with('~') {
+        path.clone()
+    } else {
+        format!("{}/{}", vault_path, path)
+    };
+
+    let content = std::fs::read_to_string(&full_path)
+        .map_err(|e| format!("Failed to read file: {}", e))?;
+    let content_hash = crate::vault::compute_content_hash(&content);
+
+    if let Some(embedding) = crate::ai::generate_embedding(&backend, &model, &content) {
+        state.db.store_embedding(&full_path, &embedding, &content_hash)?;
+        return Ok(true);
+    }
+
+    Ok(false)
+}
+
+#[tauri::command]
+pub async fn get_similar_notes_for_margin(path: String, state: State<'_, AppState>) -> Result<Vec<MarginAnnotation>, String> {
+    let (vault_path, threshold) = {
+        let config = state.config.read().map_err(|e| format!("Config lock error: {}", e))?;
+        (
+            config.get_vault_path().to_string_lossy().to_string(),
+            config.judgement_brain.similarity_threshold,
+        )
+    };
+
+    let full_path = if path.starts_with('/') || path.starts_with('~') {
+        path.clone()
+    } else {
+        format!("{}/{}", vault_path, path)
+    };
+
+    let embedding = match state.db.get_embedding(&full_path)? {
+        Some(e) => e,
+        None => return Ok(vec![]),
+    };
+
+    let similar = state.db.find_similar(&embedding, 5, &full_path)?;
+
+    let annotations = similar.into_iter()
+        .filter(|(_, sim)| *sim >= threshold)
+        .enumerate()
+        .map(|(i, (file_path, similarity))| {
+            let name = std::path::Path::new(&file_path)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("Unknown")
+                .to_string();
+            MarginAnnotation {
+                id: format!("similar_{}", i),
+                annotation_type: "related_note".to_string(),
+                icon: "💡".to_string(),
+                title: name,
+                content: format!("類似度: {:.0}%", similarity * 100.0),
+                link: Some(file_path),
+            }
+        })
+        .collect();
+
+    Ok(annotations)
 }
 
 #[tauri::command]
