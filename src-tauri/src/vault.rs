@@ -34,25 +34,30 @@ pub fn list_files(vault_path: &str, relative_path: Option<&str>) -> Result<Vec<F
         return Ok(vec![]);
     }
 
-    let mut entries: Vec<FileEntry> = WalkDir::new(&search_path)
-        .max_depth(1)
-        .min_depth(1)
-        .into_iter()
+    build_tree(&search_path)
+}
+
+fn build_tree(dir: &std::path::Path) -> Result<Vec<FileEntry>, String> {
+    let mut entries: Vec<FileEntry> = std::fs::read_dir(dir)
+        .map_err(|e| format!("Failed to read directory: {}", e))?
         .filter_map(|e| e.ok())
         .filter_map(|entry| {
             let path = entry.path();
             let is_dir = path.is_dir();
-
-            if !is_dir {
-                if path.extension().and_then(|e| e.to_str()) != Some("md") {
-                    return None;
-                }
-            }
-
             let name = path.file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("")
                 .to_string();
+
+            // 隠しフォルダ・ファイルをスキップ
+            if name.starts_with('.') {
+                return None;
+            }
+
+            // ディレクトリでもファイルでも .md 以外のファイルはスキップ
+            if !is_dir && path.extension().and_then(|e| e.to_str()) != Some("md") {
+                return None;
+            }
 
             let modified_at = entry.metadata().ok()
                 .and_then(|m| m.modified().ok())
@@ -62,11 +67,17 @@ pub fn list_files(vault_path: &str, relative_path: Option<&str>) -> Result<Vec<F
 
             let path_str = path.to_string_lossy().to_string();
 
+            let children = if is_dir {
+                build_tree(&path).ok()
+            } else {
+                None
+            };
+
             Some(FileEntry {
                 path: path_str,
                 name,
                 is_dir,
-                children: None,
+                children,
                 modified_at,
             })
         })

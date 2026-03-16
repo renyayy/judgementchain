@@ -1,8 +1,15 @@
+import { useState } from "react";
 import CodeMirror from "@uiw/react-codemirror";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { EditorView } from "@codemirror/view";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import rehypeHighlight from "rehype-highlight";
+import "highlight.js/styles/github-dark.css";
+
+type ViewMode = "edit" | "split" | "preview";
 
 interface EditorProps {
   content: string;
@@ -29,23 +36,16 @@ const editorTheme = EditorView.theme({
   ".cm-line": {
     padding: "0",
   },
-  // wikilink styling
-  ".cm-wikilink": {
-    color: "#79b8ff",
-    textDecoration: "underline",
-    cursor: "pointer",
-  },
 });
 
+const extensions = [
+  markdown({ base: markdownLanguage, codeLanguages: languages }),
+  editorTheme,
+  EditorView.lineWrapping,
+];
+
 export function Editor({ content, filePath, isDirty, onChange }: EditorProps) {
-  const extensions = [
-    markdown({
-      base: markdownLanguage,
-      codeLanguages: languages,
-    }),
-    editorTheme,
-    EditorView.lineWrapping,
-  ];
+  const [viewMode, setViewMode] = useState<ViewMode>("edit");
 
   if (!filePath) {
     return (
@@ -65,40 +65,80 @@ export function Editor({ content, filePath, isDirty, onChange }: EditorProps) {
           {filePath.split("/").pop()}
           {isDirty && <span className="editor-dirty-indicator">●</span>}
         </span>
+        <div className="view-mode-toggle">
+          <button
+            className={viewMode === "edit" ? "active" : ""}
+            onClick={() => setViewMode("edit")}
+            title="編集"
+          >
+            編集
+          </button>
+          <button
+            className={viewMode === "split" ? "active" : ""}
+            onClick={() => setViewMode("split")}
+            title="分割"
+          >
+            分割
+          </button>
+          <button
+            className={viewMode === "preview" ? "active" : ""}
+            onClick={() => setViewMode("preview")}
+            title="プレビュー"
+          >
+            プレビュー
+          </button>
+        </div>
       </div>
-      <div className="editor-body">
-        <CodeMirror
-          value={content}
-          theme={oneDark}
-          extensions={extensions}
-          onChange={onChange}
-          basicSetup={{
-            lineNumbers: true,
-            highlightActiveLineGutter: true,
-            highlightSpecialChars: true,
-            history: true,
-            foldGutter: false,
-            drawSelection: true,
-            dropCursor: true,
-            allowMultipleSelections: true,
-            indentOnInput: true,
-            syntaxHighlighting: true,
-            bracketMatching: true,
-            closeBrackets: true,
-            autocompletion: true,
-            rectangularSelection: false,
-            crosshairCursor: false,
-            highlightActiveLine: true,
-            highlightSelectionMatches: true,
-            closeBracketsKeymap: true,
-            defaultKeymap: true,
-            searchKeymap: true,
-            historyKeymap: true,
-            foldKeymap: false,
-            completionKeymap: true,
-            lintKeymap: true,
-          }}
-        />
+
+      <div className={`editor-body editor-body--${viewMode}`}>
+        {(viewMode === "edit" || viewMode === "split") && (
+          <div className="editor-pane">
+            <CodeMirror
+              value={content}
+              height="100%"
+              theme={oneDark}
+              extensions={extensions}
+              onChange={onChange}
+              basicSetup={{
+                lineNumbers: true,
+                highlightActiveLineGutter: true,
+                highlightSpecialChars: true,
+                history: true,
+                foldGutter: false,
+                drawSelection: true,
+                dropCursor: true,
+                allowMultipleSelections: true,
+                indentOnInput: true,
+                syntaxHighlighting: true,
+                bracketMatching: true,
+                closeBrackets: true,
+                autocompletion: true,
+                rectangularSelection: false,
+                crosshairCursor: false,
+                highlightActiveLine: true,
+                highlightSelectionMatches: true,
+                closeBracketsKeymap: true,
+                defaultKeymap: true,
+                searchKeymap: true,
+                historyKeymap: true,
+                foldKeymap: false,
+                completionKeymap: true,
+                lintKeymap: true,
+              }}
+            />
+          </div>
+        )}
+
+        {(viewMode === "preview" || viewMode === "split") && (
+          <div className="preview-pane">
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              rehypePlugins={[rehypeHighlight]}
+            >
+              {content}
+            </ReactMarkdown>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -1,26 +1,33 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import type { FileEntry } from "../types";
 
 interface FileTreeProps {
   files: FileEntry[];
   selectedPath: string | null;
+  forceExpanded: boolean | null;
   onSelect: (path: string) => void;
   onCreate: (path: string) => void;
   onDelete: (path: string) => void;
-  onRefresh: () => void;
 }
 
 interface FileNodeProps {
   entry: FileEntry;
   depth: number;
   selectedPath: string | null;
+  forceExpanded: boolean | null;
   onSelect: (path: string) => void;
   onDelete: (path: string) => void;
 }
 
-function FileNode({ entry, depth, selectedPath, onSelect, onDelete }: FileNodeProps) {
+function FileNode({ entry, depth, selectedPath, forceExpanded, onSelect, onDelete }: FileNodeProps) {
   const [expanded, setExpanded] = useState(true);
   const isSelected = selectedPath === entry.path;
+
+  useEffect(() => {
+    if (forceExpanded !== null) {
+      setExpanded(forceExpanded);
+    }
+  }, [forceExpanded]);
 
   const handleClick = () => {
     if (entry.is_dir) {
@@ -49,11 +56,7 @@ function FileNode({ entry, depth, selectedPath, onSelect, onDelete }: FileNodePr
         </span>
         <span className="file-name">{entry.name}</span>
         {!entry.is_dir && (
-          <button
-            className="file-action-btn"
-            onClick={handleDelete}
-            title="削除"
-          >
+          <button className="file-action-btn" onClick={handleDelete} title="削除">
             ✕
           </button>
         )}
@@ -64,6 +67,7 @@ function FileNode({ entry, depth, selectedPath, onSelect, onDelete }: FileNodePr
           entry={child}
           depth={depth + 1}
           selectedPath={selectedPath}
+          forceExpanded={forceExpanded}
           onSelect={onSelect}
           onDelete={onDelete}
         />
@@ -72,7 +76,7 @@ function FileNode({ entry, depth, selectedPath, onSelect, onDelete }: FileNodePr
   );
 }
 
-export function FileTree({ files, selectedPath, onSelect, onCreate, onDelete, onRefresh }: FileTreeProps) {
+export function FileTree({ files, selectedPath, forceExpanded, onSelect, onCreate, onDelete }: FileTreeProps) {
   const [newFileName, setNewFileName] = useState("");
   const [showNewInput, setShowNewInput] = useState(false);
 
@@ -84,14 +88,18 @@ export function FileTree({ files, selectedPath, onSelect, onCreate, onDelete, on
     setShowNewInput(false);
   }, [newFileName, onCreate]);
 
+  // メニューバーの "New Note" から開く
+  useEffect(() => {
+    const handler = () => setShowNewInput(true);
+    window.addEventListener("nomos:new-note", handler);
+    return () => window.removeEventListener("nomos:new-note", handler);
+  }, []);
+
   return (
     <aside className="file-tree">
       <div className="file-tree-header">
-        <span className="file-tree-title">ファイル</span>
-        <div className="file-tree-actions">
-          <button onClick={() => setShowNewInput(true)} title="新規ノート">＋</button>
-          <button onClick={onRefresh} title="更新">↺</button>
-        </div>
+        <span className="file-tree-title">Files</span>
+        <button className="file-tree-new-btn" onClick={() => setShowNewInput(true)} title="新規ノート">＋</button>
       </div>
 
       {showNewInput && (
@@ -120,6 +128,7 @@ export function FileTree({ files, selectedPath, onSelect, onCreate, onDelete, on
             entry={entry}
             depth={0}
             selectedPath={selectedPath}
+            forceExpanded={forceExpanded}
             onSelect={onSelect}
             onDelete={onDelete}
           />

@@ -1,8 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
+import { invoke } from "@tauri-apps/api/core";
 import { FileTree } from "./components/FileTree";
 import { Editor } from "./components/Editor";
 import { MarginPanel } from "./components/MarginPanel";
 import { useVault } from "./hooks/useVault";
+import { useAppMenu } from "./hooks/useAppMenu";
 import type { MarginAnnotation, Backlink } from "./types";
 import "./App.css";
 
@@ -28,6 +31,7 @@ function App() {
   const [backlinks, setBacklinks] = useState<Backlink[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [marginOpen, setMarginOpen] = useState(true);
+  const [folderExpandSignal, setFolderExpandSignal] = useState<boolean | null>(null);
 
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -98,6 +102,57 @@ function App() {
     handleSelectFile(path);
   }, [handleSelectFile]);
 
+  const handleOpenFolder = useCallback(async () => {
+    const selected = await open({ directory: true, multiple: false });
+    if (!selected) return;
+    const dir = typeof selected === "string" ? selected : selected[0];
+    const currentConfig = await invoke<Record<string, unknown>>("get_config");
+    const vault = currentConfig.vault as Record<string, unknown>;
+    await invoke("update_config", {
+      config: { ...currentConfig, vault: { ...vault, path: dir } }
+    });
+    setSelectedPath(null);
+    setContent("");
+    setSavedContent("");
+    setAnnotations([]);
+    setBacklinks([]);
+    await listFiles();
+  }, [listFiles]);
+
+  const handleCloseFolder = useCallback(() => {
+    setFolderExpandSignal(false);
+    setTimeout(() => setFolderExpandSignal(null), 0);
+  }, []);
+
+  const handleNewNote = useCallback(() => {
+    // FileTree の新規入力を開くため、カスタムイベントで通知
+    window.dispatchEvent(new CustomEvent("nomos:new-note"));
+  }, []);
+
+  const handleSelectVault = useCallback(async () => {
+    const selected = await open({ directory: true, multiple: false });
+    if (!selected) return;
+    const dir = typeof selected === "string" ? selected : selected[0];
+    const currentConfig = await invoke<Record<string, unknown>>("get_config");
+    const vault = currentConfig.vault as Record<string, unknown>;
+    await invoke("update_config", {
+      config: { ...currentConfig, vault: { ...vault, path: dir } }
+    });
+    setSelectedPath(null);
+    setContent("");
+    setSavedContent("");
+    setAnnotations([]);
+    setBacklinks([]);
+    await listFiles();
+  }, [listFiles]);
+
+  useAppMenu({
+    onOpenVault: handleSelectVault,
+    onOpenFolder: handleOpenFolder,
+    onCloseFolder: handleCloseFolder,
+    onNewNote: handleNewNote,
+  });
+
   return (
     <div className="app">
       <header className="app-header">
@@ -128,10 +183,10 @@ function App() {
           <FileTree
             files={files}
             selectedPath={selectedPath}
+            forceExpanded={folderExpandSignal}
             onSelect={handleSelectFile}
             onCreate={handleCreate}
             onDelete={handleDelete}
-            onRefresh={listFiles}
           />
         )}
 
