@@ -25,6 +25,10 @@ pub struct GitCommit {
     pub refs: String,
 }
 
+pub fn find_git_root_pub(path: &Path) -> Option<std::path::PathBuf> {
+    find_git_root(path)
+}
+
 fn find_git_root(path: &Path) -> Option<std::path::PathBuf> {
     let mut current = if path.is_file() {
         path.parent()?.to_path_buf()

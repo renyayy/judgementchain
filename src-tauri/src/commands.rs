@@ -658,6 +658,22 @@ pub async fn git_log(limit: Option<usize>, state: State<'_, AppState>) -> Result
 }
 
 #[tauri::command]
+pub async fn git_show(hash: String, state: State<'_, AppState>) -> Result<String, String> {
+    let vault_path = {
+        let config = state.config.read().map_err(|e| format!("Config lock error: {}", e))?;
+        config.get_vault_path().to_string_lossy().to_string()
+    };
+    let path = crate::config::expand_tilde(&vault_path);
+    let git_root = crate::git::find_git_root_pub(&path).ok_or("Not a git repository")?;
+    let out = std::process::Command::new("git")
+        .args(["show", "--stat", "-p", &hash])
+        .current_dir(&git_root)
+        .output()
+        .map_err(|e| e.to_string())?;
+    Ok(String::from_utf8_lossy(&out.stdout).to_string())
+}
+
+#[tauri::command]
 pub async fn git_init(state: State<'_, AppState>) -> Result<bool, String> {
     let vault_path = {
         let config = state.config.read().map_err(|e| format!("Config lock error: {}", e))?;
@@ -668,27 +684,41 @@ pub async fn git_init(state: State<'_, AppState>) -> Result<bool, String> {
 }
 
 #[tauri::command]
-pub async fn get_diff(path: String, state: State<'_, AppState>) -> Result<String, String> {
-    let git_enabled = {
-        let config = state.config.read().map_err(|e| format!("Config lock error: {}", e))?;
-        config.git.enabled
-    };
-
-    if !git_enabled {
-        return Ok(String::new());
-    }
-
-    // Attempt to run git diff on the file
+pub async fn get_diff(path: String, _state: State<'_, AppState>) -> Result<String, String> {
     let p = std::path::Path::new(&path);
     if let Some(parent) = p.parent() {
-        let output = std::process::Command::new("git")
+        // Try working-tree diff vs HEAD first (covers modified files)
+        if let Ok(out) = std::process::Command::new("git")
             .args(["diff", "HEAD", "--", &path])
             .current_dir(parent)
-            .output();
-
-        if let Ok(out) = output {
-            if out.status.success() {
-                return Ok(String::from_utf8_lossy(&out.stdout).to_string());
+            .output()
+        {
+            let text = String::from_utf8_lossy(&out.stdout).to_string();
+            if !text.trim().is_empty() {
+                return Ok(text);
+            }
+        }
+        // Fall back to cached diff (staged new files)
+        if let Ok(out) = std::process::Command::new("git")
+            .args(["diff", "--cached", "--", &path])
+            .current_dir(parent)
+            .output()
+        {
+            let text = String::from_utf8_lossy(&out.stdout).to_string();
+            if !text.trim().is_empty() {
+                return Ok(text);
+            }
+        }
+        // Untracked file: synthesize a full-addition diff
+        if p.exists() {
+            if let Ok(content) = std::fs::read_to_string(p) {
+                let mut out = format!("+++ {}\n", path);
+                for line in content.lines() {
+                    out.push('+');
+                    out.push_str(line);
+                    out.push('\n');
+                }
+                return Ok(out);
             }
         }
     }

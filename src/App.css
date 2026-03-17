@@ -1317,3 +1317,47 @@ body.resizing * {
   cursor: not-allowed;
 }
 .git-ref-tag { background: #3d2e00; color: #ffa657; }
+
+/* ---- Git diff viewer ---- */
+.git-diff-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.git-diff-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.git-diff-path {
+  font-size: 11px;
+  color: var(--text-primary);
+  font-family: var(--font-mono, monospace);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 160px;
+}
+.git-diff-body {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: auto;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.git-diff-line {
+  padding: 0 8px;
+  white-space: pre;
+  display: block;
+}
+.git-diff-add  { background: rgba(63,185,80,0.12); color: #3fb950; }
+.git-diff-del  { background: rgba(248,81,73,0.12);  color: #f85149; }
+.git-diff-hunk { background: rgba(88,166,255,0.08); color: #58a6ff; }
+.git-diff-meta { color: var(--text-muted); }
+.git-diff-ctx  { color: var(--text-secondary); }

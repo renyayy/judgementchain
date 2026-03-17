@@ -70,6 +70,7 @@ pub fn run() {
             commands::git_unstage,
             commands::git_commit,
             commands::git_log,
+            commands::git_show,
             commands::git_init,
             commands::embed_note,
             commands::get_similar_notes_for_margin,

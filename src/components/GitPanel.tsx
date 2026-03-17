@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import type { GitStatus, GitCommit } from "../types";
 
 // ---- Graph layout --------------------------------------------------------
@@ -151,11 +152,49 @@ interface GitPanelProps {
   onInit: () => void;
 }
 
+// ---- Diff viewer ----------------------------------------------------------
+
+function diffLineClass(line: string): string {
+  if (line.startsWith("+") && !line.startsWith("+++")) return "git-diff-add";
+  if (line.startsWith("-") && !line.startsWith("---")) return "git-diff-del";
+  if (line.startsWith("@@")) return "git-diff-hunk";
+  if (line.startsWith("diff ") || line.startsWith("index ") || line.startsWith("---") || line.startsWith("+++")) return "git-diff-meta";
+  return "git-diff-ctx";
+}
+
+function DiffView({ path, content, onClose }: { path: string; content: string; onClose: () => void }) {
+  const lines = content.split("\n");
+  const name = path.split("/").pop() ?? path;
+  return (
+    <div className="git-diff-view">
+      <div className="git-diff-header">
+        <span className="git-diff-path" title={path}>{name}</span>
+        <button className="git-icon-btn" onClick={onClose} title="閉じる">✕</button>
+      </div>
+      <div className="git-diff-body">
+        {content.trim() ? (
+          lines.map((line, i) => (
+            <div key={i} className={`git-diff-line ${diffLineClass(line)}`}>
+              {line || "\u00a0"}
+            </div>
+          ))
+        ) : (
+          <div className="git-empty">差分なし</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---- Main component -------------------------------------------------------
+
 type Tab = "changes" | "history";
 
 export function GitPanel({ status, commits, onRefresh, onStage, onUnstage, onCommit, onInit }: GitPanelProps) {
   const [tab, setTab] = useState<Tab>("changes");
   const [commitMsg, setCommitMsg] = useState("");
+  const [activeDiff, setActiveDiff] = useState<{ path: string; content: string } | null>(null);
+  const [activeCommit, setActiveCommit] = useState<{ hash: string; message: string; content: string } | null>(null);
   const [width, setWidth] = useState(240);
   const isDragging = useRef(false);
   const startX = useRef(0);
@@ -174,6 +213,16 @@ export function GitPanel({ status, commits, onRefresh, onStage, onUnstage, onCom
     onCommit(commitMsg.trim());
     setCommitMsg("");
   };
+
+  const handleFileClick = useCallback(async (path: string) => {
+    const content = await invoke<string>("get_diff", { path }).catch(() => "");
+    setActiveDiff({ path, content });
+  }, []);
+
+  const handleCommitClick = useCallback(async (hash: string, message: string) => {
+    const content = await invoke<string>("git_show", { hash }).catch(() => "");
+    setActiveCommit({ hash, message, content });
+  }, []);
 
   const handleResizeStart = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -240,14 +289,22 @@ export function GitPanel({ status, commits, onRefresh, onStage, onUnstage, onCom
 
           {tab === "changes" && (
             <div className="git-changes">
+              {activeDiff ? (
+                <DiffView
+                  path={activeDiff.path}
+                  content={activeDiff.content}
+                  onClose={() => setActiveDiff(null)}
+                />
+              ) : (
+                <>
               {staged.length > 0 && (
                 <div className="git-section">
                   <div className="git-section-title">ステージ済み</div>
                   {staged.map((f) => (
-                    <div key={f.path} className="git-file-row">
+                    <div key={f.path} className="git-file-row" onClick={() => handleFileClick(f.path)} style={{ cursor: "pointer" }}>
                       <span className="git-status-badge" style={{ color: statusColor(f.status) }}>{f.status}</span>
                       <span className="git-file-name" title={f.path}>{shortPath(f.path)}</span>
-                      <button className="git-file-btn" onClick={() => onUnstage(f.path)} title="ステージ解除">−</button>
+                      <button className="git-file-btn" onClick={(e) => { e.stopPropagation(); onUnstage(f.path); }} title="ステージ解除">−</button>
                     </div>
                   ))}
                 </div>
@@ -256,16 +313,18 @@ export function GitPanel({ status, commits, onRefresh, onStage, onUnstage, onCom
                 <div className="git-section">
                   <div className="git-section-title">変更</div>
                   {unstaged.map((f) => (
-                    <div key={f.path} className="git-file-row">
+                    <div key={f.path} className="git-file-row" onClick={() => handleFileClick(f.path)} style={{ cursor: "pointer" }}>
                       <span className="git-status-badge" style={{ color: statusColor(f.status) }}>{f.status}</span>
                       <span className="git-file-name" title={f.path}>{shortPath(f.path)}</span>
-                      <button className="git-file-btn" onClick={() => onStage(f.path)} title="ステージ">＋</button>
+                      <button className="git-file-btn" onClick={(e) => { e.stopPropagation(); onStage(f.path); }} title="ステージ">＋</button>
                     </div>
                   ))}
                 </div>
               )}
               {status.files.length === 0 && (
                 <div className="git-empty">変更はありません</div>
+              )}
+                </>
               )}
               <div className="git-commit-area">
                 <textarea
@@ -288,17 +347,33 @@ export function GitPanel({ status, commits, onRefresh, onStage, onUnstage, onCom
 
           {tab === "history" && (
             <div className="git-history">
-              {graph.length === 0 && <div className="git-empty">コミット履歴なし</div>}
-              {graph.map((row) => (
-                <div key={row.commit.hash} className="git-graph-row" title={row.commit.hash}>
-                  <GraphCell row={row} />
-                  <div className="git-graph-info">
-                    <span className="git-graph-msg">{row.commit.message}</span>
-                    <RefBadges refs={row.commit.refs} />
-                    <span className="git-graph-hash">{row.commit.short_hash}</span>
-                  </div>
-                </div>
-              ))}
+              {activeCommit ? (
+                <DiffView
+                  path={activeCommit.message}
+                  content={activeCommit.content}
+                  onClose={() => setActiveCommit(null)}
+                />
+              ) : (
+                <>
+                  {graph.length === 0 && <div className="git-empty">コミット履歴なし</div>}
+                  {graph.map((row) => (
+                    <div
+                      key={row.commit.hash}
+                      className="git-graph-row"
+                      title={row.commit.hash}
+                      style={{ cursor: "pointer" }}
+                      onClick={() => handleCommitClick(row.commit.hash, row.commit.message)}
+                    >
+                      <GraphCell row={row} />
+                      <div className="git-graph-info">
+                        <span className="git-graph-msg">{row.commit.message}</span>
+                        <RefBadges refs={row.commit.refs} />
+                        <span className="git-graph-hash">{row.commit.short_hash}</span>
+                      </div>
+                    </div>
+                  ))}
+                </>
+              )}
             </div>
           )}
         </>
