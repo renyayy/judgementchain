@@ -29,7 +29,7 @@ pub fn get_bundled_model_path(app: &tauri::AppHandle) -> Result<PathBuf, String>
             .path()
             .resource_dir()
             .map_err(|e| format!("リソースディレクトリの取得に失敗しました: {}", e))?;
-        Ok(resource_dir.join(GEMMA_MODEL_FILENAME))
+        Ok(resource_dir.join("models").join(GEMMA_MODEL_FILENAME))
     }
 }
 
