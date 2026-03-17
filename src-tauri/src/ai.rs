@@ -51,21 +51,29 @@ impl CandleState {
     /// GGUF モデルファイルをロードして CandleState を返す。
     /// 重いので spawn_blocking から呼ぶこと。
     pub fn load(model_path: &Path) -> Result<Self, String> {
-        // デバイス選択（macOS では Metal を試みる）
-        let device = Self::select_device()?;
-
-        // GGUF ファイルを読み込む
-        let mut file = std::fs::File::open(model_path)
-            .map_err(|e| format!("モデルファイルを開けません: {}", e))?;
-        
-        let content = gguf_file::Content::read(&mut file)
-            .map_err(|e| format!("GGUF読み込み失敗: {}", e))?;
-        
-        let model = qgm::ModelWeights::from_gguf(content, &mut file, &device)
-            .map_err(|e| format!("モデル読み込み失敗: {}", e))?;
-
-        // トークナイザをロード（GGUF に埋め込まれている場合は抽出、なければ HF から取得）
         let tokenizer = Self::load_tokenizer(model_path)?;
+
+        let gpu_device = Self::select_gpu_device();
+
+        if let Some(device) = gpu_device {
+            match Self::load_model(model_path, &device) {
+                Ok(model) => {
+                    return Ok(Self {
+                        model,
+                        tokenizer,
+                        device,
+                        model_path: model_path.to_path_buf(),
+                    });
+                }
+                Err(e) => {
+                    eprintln!("[ai] GPU でのモデル読み込み失敗 ({}), CPU にフォールバックします", e);
+                }
+            }
+        }
+
+        eprintln!("[ai] CPU を使用します");
+        let device = Device::Cpu;
+        let model = Self::load_model(model_path, &device)?;
 
         Ok(Self {
             model,
@@ -75,14 +83,37 @@ impl CandleState {
         })
     }
 
-    fn select_device() -> Result<Device, String> {
-        #[cfg(target_os = "macos")]
+    fn select_gpu_device() -> Option<Device> {
+        #[cfg(target_os = "linux")]
         {
-            if let Ok(device) = Device::new_metal(0) {
-                return Ok(device);
+            match Device::new_cuda(0) {
+                Ok(device) => {
+                    eprintln!("[ai] CUDA デバイスを検出しました");
+                    return Some(device);
+                }
+                Err(e) => eprintln!("[ai] CUDA 初期化失敗: {}", e),
             }
         }
-        Ok(Device::Cpu)
+        #[cfg(target_os = "macos")]
+        {
+            match Device::new_metal(0) {
+                Ok(device) => {
+                    eprintln!("[ai] Metal デバイスを検出しました");
+                    return Some(device);
+                }
+                Err(e) => eprintln!("[ai] Metal 初期化失敗: {}", e),
+            }
+        }
+        None
+    }
+
+    fn load_model(model_path: &Path, device: &Device) -> Result<qgm::ModelWeights, String> {
+        let mut file = std::fs::File::open(model_path)
+            .map_err(|e| format!("モデルファイルを開けません: {}", e))?;
+        let content = gguf_file::Content::read(&mut file)
+            .map_err(|e| format!("GGUF読み込み失敗: {}", e))?;
+        qgm::ModelWeights::from_gguf(content, &mut file, device)
+            .map_err(|e| format!("モデル読み込み失敗: {}", e))
     }
 
     fn load_tokenizer(model_path: &Path) -> Result<Tokenizer, String> {
@@ -128,47 +159,51 @@ impl CandleState {
         let mut tokens: Vec<u32> = prompt_tokens.to_vec();
         
         let mut output = String::new();
-        let eos_token_id = self.tokenizer
-            .token_to_id("<eos>")
-            .or_else(|| self.tokenizer.token_to_id("</s>"))
-            .or_else(|| self.tokenizer.token_to_id("<|endoftext|>"))
-            .unwrap_or(2);
+        let mut stop_token_ids: Vec<u32> = Vec::new();
+        for token_str in &["<eos>", "</s>", "<end_of_turn>", "<|endoftext|>"] {
+            if let Some(id) = self.tokenizer.token_to_id(token_str) {
+                stop_token_ids.push(id);
+            }
+        }
+        if stop_token_ids.is_empty() {
+            stop_token_ids.push(2);
+        }
+
+        let mut index_pos = 0usize;
 
         for _i in 0..max_tokens {
-            // 入力テンソルを作成
-            let input = Tensor::new(&tokens[..], &self.device)
+            let input_tokens = if index_pos == 0 {
+                &tokens[..]
+            } else {
+                &tokens[tokens.len() - 1..]
+            };
+
+            let input = Tensor::new(input_tokens, &self.device)
                 .map_err(|e| format!("テンソル作成失敗: {}", e))?
                 .unsqueeze(0)
                 .map_err(|e| format!("次元追加失敗: {}", e))?;
-            
-            // 推論
+
             let logits = self.model
-                .forward(&input, tokens.len() - 1)
+                .forward(&input, index_pos)
                 .map_err(|e| format!("推論失敗: {}", e))?;
-            
-            // 最後のトークンのロジットを取得
+
             let logits = logits
                 .squeeze(0)
                 .map_err(|e| format!("squeeze失敗: {}", e))?;
-            let logits = logits
-                .get(logits.dim(0).map_err(|e| format!("dim取得失敗: {}", e))? - 1)
-                .map_err(|e| format!("logits取得失敗: {}", e))?;
-            
-            // Greedy サンプリング
+
             let next_token = logits
-                .argmax(0)
+                .argmax(candle_core::D::Minus1)
                 .map_err(|e| format!("argmax失敗: {}", e))?
                 .to_scalar::<u32>()
                 .map_err(|e| format!("スカラー変換失敗: {}", e))?;
-            
-            // 終了条件
-            if next_token == eos_token_id {
+
+            if stop_token_ids.contains(&next_token) {
                 break;
             }
-            
+
+            index_pos += input_tokens.len();
             tokens.push(next_token);
-            
-            // トークンを文字列に変換
+
             if let Ok(piece) = self.tokenizer.decode(&[next_token], false) {
                 on_token(&piece);
                 output.push_str(&piece);

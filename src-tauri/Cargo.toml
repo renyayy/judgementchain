@@ -34,13 +34,24 @@ hex = "0.4"
 dirs = "5"
 regex = "1"
 encoding_rs = "0.8"
-candle-core = { git = "https://github.com/huggingface/candle" }
-candle-nn = { git = "https://github.com/huggingface/candle" }
-candle-transformers = { git = "https://github.com/huggingface/candle" }
+candle-core = { git = "https://github.com/liverHawk/candle.git", branch = "main" }
+candle-nn = { git = "https://github.com/liverHawk/candle.git", branch = "main" }
+candle-transformers = { git = "https://github.com/liverHawk/candle.git", branch = "main" }
 tokenizers = "0.21"
 hf-hub = "0.4"
 
+[features]
+default = []
+cuda = ["candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda"]
+metal = ["candle-core/metal", "candle-nn/metal", "candle-transformers/metal"]
+
 [target.'cfg(target_os = "macos")'.dependencies]
-candle-core = { git = "https://github.com/huggingface/candle", features = ["metal"] }
-candle-nn = { git = "https://github.com/huggingface/candle", features = ["metal"] }
-candle-transformers = { git = "https://github.com/huggingface/candle", features = ["metal"] }
+candle-core = { git = "https://github.com/liverHawk/candle.git", branch = "main", features = ["metal"] }
+candle-nn = { git = "https://github.com/liverHawk/candle.git", branch = "main", features = ["metal"] }
+candle-transformers = { git = "https://github.com/liverHawk/candle.git", branch = "main", features = ["metal"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+candle-core = { git = "https://github.com/liverHawk/candle.git", branch = "main", features = ["cuda"] }
+candle-nn = { git = "https://github.com/liverHawk/candle.git", branch = "main", features = ["cuda"] }
+candle-transformers = { git = "https://github.com/liverHawk/candle.git", branch = "main", features = ["cuda"] }
+

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNotifications } from "../hooks/useNotifications";
 import type { Notification, NotificationType } from "../lib/notifications";
 
@@ -15,6 +15,38 @@ const ACCENT: Record<NotificationType, string> = {
   warning: "#e8b44a",
   error: "#e05252",
 };
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(() => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }, [text]);
+
+  return (
+    <button
+      onClick={handleCopy}
+      style={{
+        background: "none",
+        border: "none",
+        color: copied ? "#4ec94e" : "var(--text-muted)",
+        cursor: "pointer",
+        fontSize: 11,
+        lineHeight: "18px",
+        padding: 0,
+        flexShrink: 0,
+        transition: "color 0.15s",
+      }}
+      aria-label="コピー"
+      title="エラー文をコピー"
+    >
+      {copied ? "✓" : "⎘"}
+    </button>
+  );
+}
 
 function Toast({
   n,
@@ -63,10 +95,15 @@ function Toast({
           color: "var(--text-primary)",
           lineHeight: 1.5,
           wordBreak: "break-word",
+          userSelect: "text",
+          cursor: "text",
         }}
       >
         {n.message}
       </span>
+      {(n.type === "error" || n.type === "warning") && (
+        <CopyButton text={n.message} />
+      )}
       <button
         onClick={() => onDismiss(n.id)}
         style={{

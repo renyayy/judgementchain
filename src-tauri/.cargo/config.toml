@@ -2,3 +2,5 @@
 [env]
 MACOSX_DEPLOYMENT_TARGET = "10.15"
 CMAKE_OSX_DEPLOYMENT_TARGET = "10.15"
+NVCC = "/usr/local/cuda-12.6/bin/nvcc"
+CUDA_HOME = "/usr/local/cuda-12.6"
