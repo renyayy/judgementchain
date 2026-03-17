@@ -1,10 +1,9 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { FileTree } from "./components/FileTree";
-import { Editor } from "./components/Editor";
-import { TabBar } from "./components/TabBar";
+import { EditorPane, type PaneState } from "./components/EditorPane";
 import { MarginPanel } from "./components/MarginPanel";
 import { GitPanel } from "./components/GitPanel";
 import { NotificationContainer } from "./components/NotificationContainer";
@@ -18,44 +17,51 @@ import type { EditorTab, MarginAnnotation } from "./types";
 import "./App.css";
 
 const AUTO_SAVE_DELAY = 1000;
-
 let tabCounter = 0;
-function newTabId() { return `tab-${++tabCounter}`; }
+const newTabId = () => `tab-${++tabCounter}`;
+const EMPTY_PANE: PaneState = { tabs: [], activeId: null };
 
 function App() {
-  const {
-    files,
-    listFiles,
-    openFile,
-    saveFile,
-    createFile,
-    createDir,
-    deleteFile,
-    getMarginAnnotations,
-    getBacklinks,
-  } = useVault();
+  const { files, listFiles, openFile, saveFile, createFile, createDir, deleteFile, getMarginAnnotations, getBacklinks } = useVault();
 
-  const [tabs, setTabs] = useState<EditorTab[]>([]);
-  const [activeTabId, setActiveTabId] = useState<string | null>(null);
-  const activeTab = tabs.find((t) => t.id === activeTabId) ?? null;
+  const [leftPane, setLeftPane] = useState<PaneState>(EMPTY_PANE);
+  const [rightPane, setRightPane] = useState<PaneState>(EMPTY_PANE);
+  const [splitOpen, setSplitOpen] = useState(false);
+  const [activePaneId, setActivePaneId] = useState<"left" | "right">("left");
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [marginOpen, setMarginOpen] = useState(true);
   const [gitOpen, setGitOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
-
-  const { modelStatus, messages, isGenerating, loadModel, generateText, clearMessages } = useAI();
-  const { status: gitStatus, commits: gitCommits, refresh: refreshGit,
-    stage: gitStage, unstage: gitUnstage, commit: gitCommit, initRepo: gitInit } = useGit();
-  const [folderExpandSignal, setFolderExpandSignal] = useState<boolean | null>(null);
   const [vaultName, setVaultName] = useState("");
   const [vaultPath, setVaultPath] = useState("");
 
+  const { modelStatus, messages, isGenerating, loadModel, generateText, clearMessages } = useAI();
+  const { status: gitStatus, commits: gitCommits, refresh: refreshGit, stage: gitStage, unstage: gitUnstage, commit: gitCommit, initRepo: gitInit } = useGit();
+  const [folderExpandSignal, setFolderExpandSignal] = useState<boolean | null>(null);
+
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const contradictionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // activeTabId を ref でも保持（クロージャ内から参照するため）
-  const activeTabIdRef = useRef<string | null>(null);
-  activeTabIdRef.current = activeTabId;
+  const activePaneIdRef = useRef<"left" | "right">("left");
+  activePaneIdRef.current = activePaneId;
+
+  // ---- helpers ----------------------------------------------------------------
+
+  const setPane = useCallback((id: "left" | "right", fn: (p: PaneState) => PaneState) => {
+    if (id === "left") setLeftPane(fn);
+    else setRightPane(fn);
+  }, []);
+
+  const getPane = useCallback((id: "left" | "right") =>
+    id === "left" ? leftPane : rightPane,
+  [leftPane, rightPane]);
+
+  const activeTab = useMemo(() => {
+    const p = activePaneId === "left" ? leftPane : rightPane;
+    return p.tabs.find((t) => t.id === p.activeId) ?? null;
+  }, [activePaneId, leftPane, rightPane]);
+
+  // ---- initial load -----------------------------------------------------------
 
   useEffect(() => {
     listFiles();
@@ -68,253 +74,212 @@ function App() {
   }, [listFiles]);
 
   useEffect(() => {
-    const unlisten = listen("vault:changed", () => {
-      listFiles();
-      refreshGit();
-    });
-    return () => { unlisten.then((f) => f()); };
+    const u = listen("vault:changed", () => { listFiles(); refreshGit(); });
+    return () => { u.then((f) => f()); };
   }, [listFiles, refreshGit]);
 
-  const handleSelectFile = useCallback(async (path: string) => {
-    // 既に開いているタブがあればそちらへ切り替え
-    const existing = tabs.find((t) => t.path === path);
+  // ---- open file in pane ------------------------------------------------------
+
+  const openFileInPane = useCallback(async (path: string, paneId: "left" | "right") => {
+    const pane = paneId === "left" ? leftPane : rightPane;
+    const existing = pane.tabs.find((t) => t.path === path && t.tabType === "file");
     if (existing) {
-      setActiveTabId(existing.id);
+      setPane(paneId, (p) => ({ ...p, activeId: existing.id }));
+      setActivePaneId(paneId);
       return;
     }
 
     if (isViewableFile(path)) {
       const id = newTabId();
-      setTabs((prev) => [...prev, {
-        id, path, content: "", savedContent: "", isDirty: false, annotations: [], backlinks: [],
-      }]);
-      setActiveTabId(id);
+      setPane(paneId, (p) => ({
+        tabs: [...p.tabs, { id, path, tabType: "file", content: "", savedContent: "", isDirty: false, annotations: [], backlinks: [] }],
+        activeId: id,
+      }));
+      setActivePaneId(paneId);
       return;
     }
 
     const note = await openFile(path);
     if (!note) return;
-
-    const [annots, bls] = await Promise.all([
-      getMarginAnnotations(path),
-      getBacklinks(path),
-    ]);
-
+    const [annots, bls] = await Promise.all([getMarginAnnotations(path), getBacklinks(path)]);
     const id = newTabId();
-    setTabs((prev) => [...prev, {
-      id,
-      path,
-      content: note.content,
-      savedContent: note.content,
-      isDirty: false,
-      annotations: annots,
-      backlinks: bls,
-    }]);
-    setActiveTabId(id);
-  }, [tabs, openFile, getMarginAnnotations, getBacklinks]);
+    setPane(paneId, (p) => ({
+      tabs: [...p.tabs, { id, path, tabType: "file", content: note.content, savedContent: note.content, isDirty: false, annotations: annots, backlinks: bls }],
+      activeId: id,
+    }));
+    setActivePaneId(paneId);
+  }, [leftPane, rightPane, openFile, getMarginAnnotations, getBacklinks, setPane]);
 
-  const handleCloseTab = useCallback(async (id: string) => {
-    const tab = tabs.find((t) => t.id === id);
-    if (tab?.isDirty) {
-      await saveFile(tab.path, tab.content);
+  const handleSelectFile = useCallback((path: string) =>
+    openFileInPane(path, activePaneIdRef.current),
+  [openFileInPane]);
+
+  // ---- diff / commit tabs -----------------------------------------------------
+
+  const openSpecialTab = useCallback((tab: Omit<EditorTab, "id">, paneId: "left" | "right") => {
+    const pane = paneId === "left" ? leftPane : rightPane;
+    const existing = pane.tabs.find((t) => t.tabType === tab.tabType && t.path === tab.path);
+    if (existing) {
+      setPane(paneId, (p) => ({ ...p, activeId: existing.id }));
+      setActivePaneId(paneId);
+      return;
     }
+    const id = newTabId();
+    setPane(paneId, (p) => ({
+      tabs: [...p.tabs, { ...tab, id }],
+      activeId: id,
+    }));
+    setActivePaneId(paneId);
+  }, [leftPane, rightPane, setPane]);
 
-    setTabs((prev) => {
-      const next = prev.filter((t) => t.id !== id);
-      if (activeTabIdRef.current === id) {
-        // 隣のタブへ移動
-        const idx = prev.findIndex((t) => t.id === id);
-        const nextActive = next[Math.min(idx, next.length - 1)]?.id ?? null;
-        setActiveTabId(nextActive);
+  const handleOpenDiff = useCallback((path: string, rawDiff: string) => {
+    openSpecialTab({ path, tabType: "diff", content: "", savedContent: "", isDirty: false, rawDiff, annotations: [], backlinks: [] }, activePaneIdRef.current);
+  }, [openSpecialTab]);
+
+  const handleOpenCommit = useCallback((hash: string, rawDiff: string) => {
+    openSpecialTab({ path: `commit:${hash}`, tabType: "commit", content: "", savedContent: "", isDirty: false, rawDiff, annotations: [], backlinks: [] }, activePaneIdRef.current);
+  }, [openSpecialTab]);
+
+  // ---- close tab --------------------------------------------------------------
+
+  const closeTabInPane = useCallback(async (tabId: string, paneId: "left" | "right") => {
+    const tab = getPane(paneId).tabs.find((t) => t.id === tabId);
+    if (tab?.isDirty && tab.tabType === "file") await saveFile(tab.path, tab.content);
+    setPane(paneId, (prev) => {
+      const next = prev.tabs.filter((t) => t.id !== tabId);
+      let newActiveId = prev.activeId;
+      if (prev.activeId === tabId) {
+        const idx = prev.tabs.findIndex((t) => t.id === tabId);
+        newActiveId = next[Math.min(idx, next.length - 1)]?.id ?? null;
       }
-      return next;
+      if (paneId === "right" && next.length === 0) setSplitOpen(false);
+      return { tabs: next, activeId: newActiveId };
     });
-  }, [tabs, saveFile]);
+  }, [getPane, saveFile, setPane]);
 
-  const handleSwitchTab = useCallback((id: string) => {
-    setActiveTabId(id);
-  }, []);
+  // ---- split (open in other pane) ---------------------------------------------
 
-  const handleEditorChange = useCallback((value: string) => {
-    const id = activeTabIdRef.current;
-    if (!id) return;
+  const handleSplitTab = useCallback((tabId: string, fromPaneId: "left" | "right") => {
+    const toPaneId: "left" | "right" = fromPaneId === "left" ? "right" : "left";
+    const tab = getPane(fromPaneId).tabs.find((t) => t.id === tabId);
+    if (!tab) return;
+    if (tab.tabType === "file") {
+      openFileInPane(tab.path, toPaneId);
+    } else {
+      openSpecialTab({ ...tab }, toPaneId);
+    }
+    setSplitOpen(true);
+  }, [getPane, openFileInPane, openSpecialTab]);
 
-    setTabs((prev) => prev.map((t) =>
-      t.id === id ? { ...t, content: value, isDirty: value !== t.savedContent } : t
-    ));
+  // ---- editor change (auto-save) ----------------------------------------------
+
+  const handleEditorChange = useCallback((value: string, paneId: "left" | "right") => {
+    const setPaneLocal = paneId === "left" ? setLeftPane : setRightPane;
+    setPaneLocal((prev) => ({
+      ...prev,
+      tabs: prev.tabs.map((t) =>
+        t.id === prev.activeId ? { ...t, content: value, isDirty: value !== t.savedContent } : t
+      ),
+    }));
 
     if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
-    autoSaveTimer.current = setTimeout(async () => {
-      const tabId = activeTabIdRef.current;
-      if (!tabId) return;
-
-      // 最新のタブ情報を取得
-      setTabs((prev) => {
-        const tab = prev.find((t) => t.id === tabId);
-        if (!tab) return prev;
-
+    autoSaveTimer.current = setTimeout(() => {
+      setPaneLocal((prev) => {
+        const tab = prev.tabs.find((t) => t.id === prev.activeId);
+        if (!tab || tab.tabType !== "file") return prev;
         saveFile(tab.path, tab.content).then(async () => {
           const annots = await getMarginAnnotations(tab.path);
           refreshGit();
-
-          setTabs((cur) => cur.map((t) =>
-            t.id === tabId ? { ...t, savedContent: t.content, isDirty: false, annotations: annots } : t
-          ));
-
+          setPaneLocal((cur) => ({
+            ...cur,
+            tabs: cur.tabs.map((t) =>
+              t.id === tab.id ? { ...t, savedContent: t.content, isDirty: false, annotations: annots } : t
+            ),
+          }));
           if (contradictionTimer.current) clearTimeout(contradictionTimer.current);
           contradictionTimer.current = setTimeout(async () => {
-            const contradictions = await invoke<MarginAnnotation[]>("detect_contradictions", { path: tab.path }).catch(() => []);
-            if (contradictions.length > 0) {
-              setTabs((cur) => cur.map((t) =>
-                t.id === tabId ? {
-                  ...t,
-                  annotations: [
-                    ...t.annotations.filter((a) => a.annotation_type !== "contradiction"),
-                    ...contradictions,
-                  ],
-                } : t
-              ));
+            const cs = await invoke<MarginAnnotation[]>("detect_contradictions", { path: tab.path }).catch(() => []);
+            if (cs.length > 0) {
+              setPaneLocal((cur) => ({
+                ...cur,
+                tabs: cur.tabs.map((t) =>
+                  t.id === tab.id ? { ...t, annotations: [...t.annotations.filter((a) => a.annotation_type !== "contradiction"), ...cs] } : t
+                ),
+              }));
             }
           }, 2000);
         });
-
         return prev;
       });
     }, AUTO_SAVE_DELAY);
   }, [saveFile, getMarginAnnotations, refreshGit]);
 
-  const handleCreate = useCallback(async (name: string) => {
-    await createFile(name);
-    await listFiles();
-  }, [createFile, listFiles]);
+  // ---- file tree operations ---------------------------------------------------
 
-  const handleCreateDir = useCallback(async (name: string) => {
-    await createDir(name);
-    await listFiles();
-  }, [createDir, listFiles]);
-
+  const handleCreate = useCallback(async (name: string) => { await createFile(name); await listFiles(); }, [createFile, listFiles]);
+  const handleCreateDir = useCallback(async (name: string) => { await createDir(name); await listFiles(); }, [createDir, listFiles]);
   const handleDelete = useCallback(async (path: string) => {
     await deleteFile(path);
-    // 開いているタブを閉じる
-    const tab = tabs.find((t) => t.path === path);
-    if (tab) {
-      setTabs((prev) => {
-        const next = prev.filter((t) => t.id !== tab.id);
-        if (activeTabIdRef.current === tab.id) {
-          const idx = prev.findIndex((t) => t.id === tab.id);
-          setActiveTabId(next[Math.min(idx, next.length - 1)]?.id ?? null);
-        }
-        return next;
-      });
+    for (const paneId of ["left", "right"] as const) {
+      const tab = getPane(paneId).tabs.find((t) => t.path === path);
+      if (tab) await closeTabInPane(tab.id, paneId);
     }
-  }, [deleteFile, tabs]);
+  }, [deleteFile, getPane, closeTabInPane]);
 
-  const handleOpenNote = useCallback((path: string) => {
-    handleSelectFile(path);
-  }, [handleSelectFile]);
+  const handleOpenNote = useCallback((path: string) => handleSelectFile(path), [handleSelectFile]);
 
-  const handleOpenFolder = useCallback(async () => {
-    const selected = await open({ directory: true, multiple: false });
-    if (!selected) return;
-    const dir = typeof selected === "string" ? selected : selected[0];
+  // ---- vault change -----------------------------------------------------------
+
+  const resetVault = useCallback(async (dir: string) => {
     const currentConfig = await invoke<Record<string, unknown>>("get_config");
     const vault = currentConfig.vault as Record<string, unknown>;
-    await invoke("update_config", {
-      config: { ...currentConfig, vault: { ...vault, path: dir } }
-    });
-    setTabs([]);
-    setActiveTabId(null);
-    const p1 = dir.replace(/\/$/, "");
-    setVaultPath(p1);
-    setVaultName(p1.split("/").pop() ?? p1);
-    await listFiles();
-  }, [listFiles]);
-
-  const handleCloseFolder = useCallback(() => {
-    setFolderExpandSignal(false);
-    setTimeout(() => setFolderExpandSignal(null), 0);
-  }, []);
-
-  const handleNewNote = useCallback(() => {
-    window.dispatchEvent(new CustomEvent("nomos:new-note"));
-  }, []);
-
-  const handleSelectVault = useCallback(async () => {
-    const selected = await open({ directory: true, multiple: false });
-    if (!selected) return;
-    const dir = typeof selected === "string" ? selected : selected[0];
-    const currentConfig = await invoke<Record<string, unknown>>("get_config");
-    const vault = currentConfig.vault as Record<string, unknown>;
-    await invoke("update_config", {
-      config: { ...currentConfig, vault: { ...vault, path: dir } }
-    });
-    setTabs([]);
-    setActiveTabId(null);
-    const p2 = dir.replace(/\/$/, "");
-    setVaultPath(p2);
-    setVaultName(p2.split("/").pop() ?? p2);
+    await invoke("update_config", { config: { ...currentConfig, vault: { ...vault, path: dir } } });
+    setLeftPane(EMPTY_PANE);
+    setRightPane(EMPTY_PANE);
+    setSplitOpen(false);
+    const p = dir.replace(/\/$/, "");
+    setVaultPath(p);
+    setVaultName(p.split("/").pop() ?? p);
     await listFiles();
   }, [listFiles]);
 
   useAppMenu({
-    onOpenVault: handleSelectVault,
-    onOpenFolder: handleOpenFolder,
-    onCloseFolder: handleCloseFolder,
-    onNewNote: handleNewNote,
+    onOpenVault: async () => {
+      const s = await open({ directory: true, multiple: false });
+      if (s) await resetVault(typeof s === "string" ? s : s[0]);
+    },
+    onOpenFolder: async () => {
+      const s = await open({ directory: true, multiple: false });
+      if (s) await resetVault(typeof s === "string" ? s : s[0]);
+    },
+    onCloseFolder: () => { setFolderExpandSignal(false); setTimeout(() => setFolderExpandSignal(null), 0); },
+    onNewNote: () => window.dispatchEvent(new CustomEvent("nomos:new-note")),
   });
+
+  const showRight = splitOpen && rightPane.tabs.length > 0;
 
   return (
     <div className="app">
       <NotificationContainer />
       <header className="app-header">
         <div className="app-header-left">
-          <button
-            className="header-btn"
-            onClick={() => setSidebarOpen((v) => !v)}
-            title="サイドバー"
-          >
-            ☰
-          </button>
+          <button className="header-btn" onClick={() => setSidebarOpen((v) => !v)} title="サイドバー">☰</button>
           <span className="app-title">Nomos</span>
         </div>
         <div className="app-header-right">
           {activeTab?.isDirty && <span className="save-indicator">未保存</span>}
-          <button
-            className={`header-btn ${gitOpen ? "active" : ""}`}
-            onClick={() => setGitOpen((v) => !v)}
-            title="Git"
-          >
-            ⎇
-          </button>
-          <button
-            className={`header-btn ${aiOpen ? "active" : ""}`}
-            onClick={() => setAiOpen((v) => !v)}
-            title="AI Chat (Gemma)"
-          >
-            ✦
-          </button>
-          <button
-            className="header-btn"
-            onClick={() => setMarginOpen((v) => !v)}
-            title="Judgement Brain"
-          >
-            ◧
-          </button>
+          <button className={`header-btn ${splitOpen ? "active" : ""}`} onClick={() => setSplitOpen((v) => !v)} title="分割表示">◫</button>
+          <button className={`header-btn ${gitOpen ? "active" : ""}`} onClick={() => setGitOpen((v) => !v)} title="Git">⎇</button>
+          <button className={`header-btn ${aiOpen ? "active" : ""}`} onClick={() => setAiOpen((v) => !v)} title="AI Chat">✦</button>
+          <button className="header-btn" onClick={() => setMarginOpen((v) => !v)} title="Judgement Brain">◧</button>
         </div>
       </header>
-
-      <TabBar
-        tabs={tabs}
-        activeId={activeTabId}
-        onSwitch={handleSwitchTab}
-        onClose={handleCloseTab}
-      />
 
       <div className="app-body">
         {sidebarOpen && (
           <FileTree
             files={files}
-            selectedPath={activeTab?.path ?? null}
+            selectedPath={activeTab?.tabType === "file" ? activeTab.path : null}
             forceExpanded={folderExpandSignal}
             vaultName={vaultName}
             vaultPath={vaultPath}
@@ -327,13 +292,31 @@ function App() {
         )}
 
         <main className="editor-main">
-          <Editor
-            content={activeTab?.content ?? ""}
-            filePath={activeTab?.path ?? null}
-            isDirty={activeTab?.isDirty ?? false}
-            onChange={handleEditorChange}
+          <EditorPane
+            pane={leftPane}
+            isActive={activePaneId === "left"}
+            onFocus={() => setActivePaneId("left")}
+            onSwitch={(id) => setLeftPane((p) => ({ ...p, activeId: id }))}
+            onClose={(id) => closeTabInPane(id, "left")}
+            onSplit={(id) => handleSplitTab(id, "left")}
+            onEditorChange={(v) => handleEditorChange(v, "left")}
             onNavigate={handleOpenNote}
           />
+          {showRight && (
+            <>
+              <div className="pane-divider" />
+              <EditorPane
+                pane={rightPane}
+                isActive={activePaneId === "right"}
+                onFocus={() => setActivePaneId("right")}
+                onSwitch={(id) => setRightPane((p) => ({ ...p, activeId: id }))}
+                onClose={(id) => closeTabInPane(id, "right")}
+                onSplit={(id) => handleSplitTab(id, "right")}
+                onEditorChange={(v) => handleEditorChange(v, "right")}
+                onNavigate={handleOpenNote}
+              />
+            </>
+          )}
         </main>
 
         {gitOpen && (
@@ -345,9 +328,10 @@ function App() {
             onUnstage={gitUnstage}
             onCommit={gitCommit}
             onInit={gitInit}
+            onOpenDiff={handleOpenDiff}
+            onOpenCommit={handleOpenCommit}
           />
         )}
-
         {aiOpen && (
           <AiChatPanel
             modelStatus={modelStatus}
@@ -358,7 +342,6 @@ function App() {
             onClear={clearMessages}
           />
         )}
-
         {marginOpen && (
           <MarginPanel
             annotations={activeTab?.annotations ?? []}

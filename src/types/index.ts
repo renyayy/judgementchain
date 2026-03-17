@@ -33,12 +33,16 @@ export interface Config {
   };
 }
 
+export type EditorTabType = "file" | "diff" | "commit";
+
 export interface EditorTab {
   id: string;
   path: string;
+  tabType: EditorTabType;
   content: string;
   savedContent: string;
   isDirty: boolean;
+  rawDiff?: string;
   annotations: MarginAnnotation[];
   backlinks: Backlink[];
 }
