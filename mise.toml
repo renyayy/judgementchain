@@ -10,5 +10,17 @@ doctor = "bun tauri info"
 # $ mise run build
 build = "bun tauri build --config src-tauri/tauri.release.conf.json"
 
+zip = "cd src-tauri/target/release/bundle/macos && zip -r ../../../../../judgement-brain.app.zip judgement-brain.app"
+
+# GitHub Release 作成 & アップロード
+# 使用例: mise run release 0.1.0 (v なしで指定)
+[tasks.release]
+run = "gh release create v{{arg(name='version')}} src-tauri/target/release/bundle/dmg/judgement-brain_{{arg(name='version')}}_aarch64.dmg judgement-brain.app.zip --title 'v{{arg(name='version')}}' --generate-notes"
+
+# 既存リリースへのアセット追加
+# 使用例: mise run release-upload 0.1.0 (v なしで指定)
+[tasks.release-upload]
+run = "gh release upload v{{arg(name='version')}} src-tauri/target/release/bundle/dmg/judgement-brain_{{arg(name='version')}}_aarch64.dmg judgement-brain.app.zip --clobber"
+
 [env]
 MACOSX_DEPLOYMENT_TARGET = "10.15"
