@@ -114,7 +114,7 @@ export function Editor({ content, filePath, isDirty, onChange, onNavigate }: Edi
 
       <div className={`editor-body editor-body--${viewMode}`}>
         {(viewMode === "edit" || viewMode === "split") && (
-          <div className="editor-pane">
+          <div className="editor-cm-pane">
             <CodeMirror
               value={content}
               height="100%"
