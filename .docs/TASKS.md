@@ -68,8 +68,8 @@
 | T-302 | done    | nomos-editor-ai       | 矛盾検出用プロンプト設計とDetectorモジュール                  | `.kiro/specs/nomos-editor/requirements.md` / `.kiro/specs/nomos-editor/design.md` | `ai.rs`に`build_contradiction_prompt`/`parse_contradiction_response`実装。Gemma に2ノートを渡し矛盾の有無＋理由を返す |
 | T-303 | done    | nomos-editor-backend  | `contradiction_cache` テーブルとキャッシュ制御          | `.kiro/specs/nomos-editor/design.md`                                              | `database.rs`に`store_contradiction`/`get_contradictions`/`clear_contradictions`実装。TTL 1時間 |
 | T-304 | done    | nomos-editor-frontend | Margin Annotation（⚡）の表示とノート遷移               | `.kiro/specs/nomos-editor/design.md`                                              | `detect_contradictions`コマンド実装。保存後2秒アイドルで自動起動。⚡カード赤枠スタイル適用、クリックでノート遷移 |
-| T-305 | backlog | nomos-editor-backend  | BibTeXパーサーと論文リンク検索                          | `.kiro/specs/nomos-editor/requirements.md` / `.kiro/specs/nomos-editor/design.md` | BibTeXからエントリを読み込み、ノート内容との関連候補を出せる |
-| T-306 | backlog | nomos-editor-frontend | Margin Annotation（📄📊）の表示                  | `.kiro/specs/nomos-editor/design.md`                                              | 関連論文と週次サマリのエントリを右マージンに表示できる       |
+| T-305 | done    | nomos-editor-backend  | BibTeXパーサーと論文リンク検索                          | `.kiro/specs/nomos-editor/requirements.md` / `.kiro/specs/nomos-editor/design.md` | `bibtex.rs`にパーサー実装。vault内.bibファイルをスキャンしkeyword類似度でtop-3論文を返す |
+| T-306 | done    | nomos-editor-frontend | Margin Annotation（📄📊）の表示                  | `.kiro/specs/nomos-editor/design.md`                                              | `get_margin_annotations`に📄・📊を追加。`generate_weekly_summary`コマンドでGemma生成・キャッシュ。MarginPanelで色付き表示 |
 
 
 ---

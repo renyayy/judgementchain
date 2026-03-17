@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { notify } from "../lib/notifications";
 
 export type ModelStatus = "idle" | "loading" | "ready" | "error";
 
@@ -47,6 +48,7 @@ export function useAI() {
     } catch (e) {
       console.error("load_model error:", e);
       setModelStatus("error");
+      notify(`モデルの読み込みに失敗しました: ${e}`, "error");
     }
   }, [modelStatus]);
 
@@ -72,6 +74,7 @@ export function useAI() {
         });
       } catch (e) {
         console.error("generate_text error:", e);
+        notify(`テキスト生成に失敗しました: ${e}`, "error");
         setMessages((prev) => {
           const last = prev[prev.length - 1];
           if (!last || last.role !== "assistant") return prev;

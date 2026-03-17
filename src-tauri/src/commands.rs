@@ -410,7 +410,101 @@ pub async fn get_margin_annotations(path: String, state: State<'_, AppState>) ->
         });
     }
 
+    // 3) 論文リンク（BibTeX + keyword 類似度）
+    let vault_path = {
+        let config = state.config.read().map_err(|e| format!("Config lock error: {}", e))?;
+        config.get_vault_path()
+    };
+    let note_content = std::fs::read_to_string(&path).unwrap_or_default();
+    let bib_files = crate::bibtex::find_bib_files(&vault_path);
+    let mut papers: Vec<(f32, String, String, Option<String>)> = vec![]; // (score, title, summary, key)
+    for bib_path in bib_files {
+        for entry in crate::bibtex::parse_bib_file(&bib_path) {
+            let text = entry.text_repr();
+            let score = crate::bibtex::keyword_similarity(&note_content, &text);
+            if score > 0.04 {
+                let year_str = entry.year().map(|y| format!(", {}", y)).unwrap_or_default();
+                let summary = format!("{}{}", entry.authors().chars().take(40).collect::<String>(), year_str);
+                papers.push((score, entry.title().to_string(), summary, Some(entry.key.clone())));
+            }
+        }
+    }
+    papers.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    for (i, (_, title, summary, _)) in papers.into_iter().take(3).enumerate() {
+        annotations.push(MarginAnnotation {
+            id: format!("paper_{}", i),
+            annotation_type: "paper".to_string(),
+            icon: "📄".to_string(),
+            title: title.chars().take(50).collect(),
+            content: summary,
+            link: None,
+        });
+    }
+
+    // 4) 今週のサマリ（キャッシュがある場合のみ）
+    let week_start = current_week_start();
+    if let Ok(Some(summary)) = state.db.get_weekly_summary(week_start) {
+        annotations.push(MarginAnnotation {
+            id: "summary_0".to_string(),
+            annotation_type: "summary".to_string(),
+            icon: "📊".to_string(),
+            title: "週次サマリ".to_string(),
+            content: summary.chars().take(120).collect(),
+            link: None,
+        });
+    }
+
     Ok(annotations)
+}
+
+fn current_week_start() -> i64 {
+    use chrono::{Datelike, Duration, TimeZone, Utc};
+    let now = Utc::now();
+    let days_since_monday = now.weekday().num_days_from_monday() as i64;
+    let monday = now - Duration::days(days_since_monday);
+    Utc.with_ymd_and_hms(monday.year(), monday.month(), monday.day(), 0, 0, 0)
+        .single()
+        .map(|d| d.timestamp())
+        .unwrap_or(0)
+}
+
+/// 今週のサマリをキャッシュから返す。なければ None。
+#[tauri::command]
+pub async fn get_weekly_summary(state: State<'_, AppState>) -> Result<Option<String>, String> {
+    state.db.get_weekly_summary(current_week_start())
+}
+
+/// Gemma を使って今週のサマリを生成・保存する。
+#[tauri::command]
+pub async fn generate_weekly_summary(state: State<'_, AppState>) -> Result<String, String> {
+    let week_start = current_week_start();
+
+    // 週次活動を取得
+    let activity = state.db.get_week_activity(week_start)?;
+    if activity.is_empty() {
+        return Err("今週の活動記録がありません".to_string());
+    }
+
+    // 週ラベル（例: 2026-W12）
+    let week_label = {
+        use chrono::{Datelike, TimeZone, Utc};
+        let dt = Utc.timestamp_opt(week_start, 0).single().unwrap_or_else(Utc::now);
+        format!("{}-W{:02}", dt.year(), dt.iso_week().week())
+    };
+
+    let prompt = crate::ai::build_weekly_summary_prompt(&week_label, &activity);
+    let llama = Arc::clone(&state.llama);
+
+    let summary = tokio::task::spawn_blocking(move || {
+        let guard = llama.lock().map_err(|e| format!("Lock error: {}", e))?;
+        let llama_state = guard.as_ref().ok_or("モデル未ロード")?;
+        llama_state.generate(&prompt, 256, |_| {})
+    })
+    .await
+    .map_err(|e| format!("タスクエラー: {}", e))??;
+
+    state.db.store_weekly_summary(week_start, &summary)?;
+    Ok(summary)
 }
 
 /// バックグラウンドで矛盾検出を実行し、結果をキャッシュに保存する。

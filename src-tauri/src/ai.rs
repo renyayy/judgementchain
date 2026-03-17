@@ -138,6 +138,33 @@ impl LlamaState {
     }
 }
 
+// ─── 週次サマリ ───────────────────────────────────────────────────────────────
+
+/// 週次サマリ生成用プロンプト（Gemma instruct フォーマット）
+/// `activity`: Vec<(ファイル名, アクセス回数)>
+pub fn build_weekly_summary_prompt(week_label: &str, activity: &[(String, u32)]) -> String {
+    let lines: String = activity
+        .iter()
+        .map(|(path, cnt)| {
+            let name = std::path::Path::new(path)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or(path);
+            format!("  - {}: {}回", name, cnt)
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    format!(
+        "<start_of_turn>user\n\
+         {}週のノート活動:\n{}\n\n\
+         この活動傾向から、ユーザーの「強み（よく考えている分野）」と「改善点（手薄な分野）」を\
+         それぞれ1〜2文の日本語で簡潔にまとめてください。\
+         <end_of_turn>\n<start_of_turn>model\n",
+        week_label, lines
+    )
+}
+
 // ─── 矛盾検出 ─────────────────────────────────────────────────────────────────
 
 /// 矛盾検出用のプロンプトを構築する（Gemma instruct フォーマット）。

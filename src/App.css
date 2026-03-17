@@ -812,6 +812,12 @@ body.resizing * {
 .margin-card--related_note {
   border-left: 3px solid #58a6ff;
 }
+.margin-card--paper {
+  border-left: 3px solid #d2a8ff;
+}
+.margin-card--summary {
+  border-left: 3px solid #3fb950;
+}
 .margin-card--contradiction {
   border-left: 3px solid #f78166;
   background: color-mix(in srgb, var(--bg-tertiary) 90%, #f78166 10%);

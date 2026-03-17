@@ -5,6 +5,7 @@ mod commands;
 mod git;
 mod watcher;
 mod ai;
+mod bibtex;
 
 use std::sync::{Arc, Mutex, RwLock};
 use config::Config;
@@ -76,6 +77,8 @@ pub fn run() {
             commands::load_model,
             commands::generate_text,
             commands::detect_contradictions,
+            commands::get_weekly_summary,
+            commands::generate_weekly_summary,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

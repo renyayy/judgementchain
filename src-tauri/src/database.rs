@@ -253,6 +253,53 @@ impl Database {
         ).map_err(|e| format!("Failed to clear contradictions: {}", e))?;
         Ok(())
     }
+
+    // ─── 週次サマリ ──────────────────────────────────────────────────────────
+
+    /// 週次サマリを保存・更新（week_start = その週の月曜 00:00 UTC Unix タイムスタンプ）
+    pub fn store_weekly_summary(&self, week_start: i64, summary: &str) -> Result<(), String> {
+        let conn = self.conn.lock().map_err(|e| format!("Lock error: {}", e))?;
+        let now = chrono::Utc::now().timestamp();
+        let week_end = week_start + 604_800; // +7日
+        conn.execute(
+            "INSERT OR REPLACE INTO weekly_summaries (week_start, week_end, summary, created_at)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![week_start, week_end, summary, now],
+        ).map_err(|e| format!("Failed to store weekly summary: {}", e))?;
+        Ok(())
+    }
+
+    /// 指定した週のサマリを取得
+    pub fn get_weekly_summary(&self, week_start: i64) -> Result<Option<String>, String> {
+        let conn = self.conn.lock().map_err(|e| format!("Lock error: {}", e))?;
+        let result = conn.query_row(
+            "SELECT summary FROM weekly_summaries WHERE week_start = ?1",
+            params![week_start],
+            |row| row.get::<_, String>(0),
+        );
+        match result {
+            Ok(s) => Ok(Some(s)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(format!("Failed to get weekly summary: {}", e)),
+        }
+    }
+
+    /// 今週の活動ログを集計（ファイルごとのアクセス回数）
+    pub fn get_week_activity(&self, week_start: i64) -> Result<Vec<(String, u32)>, String> {
+        let conn = self.conn.lock().map_err(|e| format!("Lock error: {}", e))?;
+        let week_end = week_start + 604_800;
+        let mut stmt = conn.prepare(
+            "SELECT file_path, COUNT(*) as cnt FROM activity_log
+             WHERE timestamp >= ?1 AND timestamp < ?2
+             GROUP BY file_path ORDER BY cnt DESC LIMIT 10",
+        ).map_err(|e| format!("Failed to prepare statement: {}", e))?;
+        let rows = stmt.query_map(params![week_start, week_end], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?))
+        }).map_err(|e| format!("Failed to query week activity: {}", e))?
+        .filter_map(|r| r.ok())
+        .collect();
+        Ok(rows)
+    }
 }
 
 fn bytes_to_f32_vec(bytes: &[u8]) -> Vec<f32> {
