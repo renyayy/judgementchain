@@ -64,10 +64,10 @@
 
 | ID    | Status  | Feature               | Task                                        | Spec link                                                                         | Done条件（最小）                        |
 | ----- | ------- | --------------------- | ------------------------------------------- | --------------------------------------------------------------------------------- | --------------------------------- |
-| T-301 | backlog | nomos-editor-ai       | Gemma 3 1B (llama.cpp) バックエンド統合（Generateのみ） | `.kiro/specs/nomos-editor/requirements.md` / `.kiro/specs/nomos-editor/design.md` | プロンプトを渡してテキスト応答が返るところまで           |
-| T-302 | backlog | nomos-editor-ai       | 矛盾検出用プロンプト設計とDetectorモジュール                  | `.kiro/specs/nomos-editor/requirements.md` / `.kiro/specs/nomos-editor/design.md` | 2ノートを渡すと「矛盾の有無＋理由」を返すAPIがある       |
-| T-303 | backlog | nomos-editor-backend  | `contradiction_cache` テーブルとキャッシュ制御          | `.kiro/specs/nomos-editor/design.md`                                              | 指定ノートの矛盾結果をキャッシュ・取得できる            |
-| T-304 | backlog | nomos-editor-frontend | Margin Annotation（⚡）の表示とノート遷移               | `.kiro/specs/nomos-editor/design.md`                                              | 矛盾がある場合、⚡と共に相手ノートへジャンプできる         |
+| T-301 | done    | nomos-editor-ai       | Gemma 3 1B (llama.cpp) バックエンド統合（Generateのみ） | `.kiro/specs/nomos-editor/requirements.md` / `.kiro/specs/nomos-editor/design.md` | `ai.rs`にLlamaState実装、`load_model`/`generate_text`コマンド、`useAI`フック、`AiChatPanel`で動作確認済み |
+| T-302 | done    | nomos-editor-ai       | 矛盾検出用プロンプト設計とDetectorモジュール                  | `.kiro/specs/nomos-editor/requirements.md` / `.kiro/specs/nomos-editor/design.md` | `ai.rs`に`build_contradiction_prompt`/`parse_contradiction_response`実装。Gemma に2ノートを渡し矛盾の有無＋理由を返す |
+| T-303 | done    | nomos-editor-backend  | `contradiction_cache` テーブルとキャッシュ制御          | `.kiro/specs/nomos-editor/design.md`                                              | `database.rs`に`store_contradiction`/`get_contradictions`/`clear_contradictions`実装。TTL 1時間 |
+| T-304 | done    | nomos-editor-frontend | Margin Annotation（⚡）の表示とノート遷移               | `.kiro/specs/nomos-editor/design.md`                                              | `detect_contradictions`コマンド実装。保存後2秒アイドルで自動起動。⚡カード赤枠スタイル適用、クリックでノート遷移 |
 | T-305 | backlog | nomos-editor-backend  | BibTeXパーサーと論文リンク検索                          | `.kiro/specs/nomos-editor/requirements.md` / `.kiro/specs/nomos-editor/design.md` | BibTeXからエントリを読み込み、ノート内容との関連候補を出せる |
 | T-306 | backlog | nomos-editor-frontend | Margin Annotation（📄📊）の表示                  | `.kiro/specs/nomos-editor/design.md`                                              | 関連論文と週次サマリのエントリを右マージンに表示できる       |
 

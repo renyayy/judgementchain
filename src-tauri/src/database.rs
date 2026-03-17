@@ -211,6 +211,48 @@ impl Database {
 
         Ok(similarities)
     }
+
+    /// 矛盾検出結果をキャッシュに保存（同ペアの既存エントリは上書き）
+    pub fn store_contradiction(&self, file_a: &str, file_b: &str, description: &str) -> Result<(), String> {
+        let conn = self.conn.lock().map_err(|e| format!("Lock error: {}", e))?;
+        let now = chrono::Utc::now().timestamp();
+        conn.execute(
+            "INSERT OR REPLACE INTO contradiction_cache (file_a, file_b, description, checked_at)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![file_a, file_b, description, now],
+        ).map_err(|e| format!("Failed to store contradiction: {}", e))?;
+        Ok(())
+    }
+
+    /// ノートに関連する矛盾を取得（TTL 1時間）
+    /// 返り値: Vec<(相手ノートパス, 説明)>
+    pub fn get_contradictions(&self, file_path: &str) -> Result<Vec<(String, String)>, String> {
+        let conn = self.conn.lock().map_err(|e| format!("Lock error: {}", e))?;
+        let ttl_cutoff = chrono::Utc::now().timestamp() - 3600;
+
+        let mut stmt = conn.prepare(
+            "SELECT file_b, description FROM contradiction_cache
+             WHERE file_a = ?1 AND checked_at > ?2"
+        ).map_err(|e| format!("Failed to prepare statement: {}", e))?;
+
+        let rows = stmt.query_map(params![file_path, ttl_cutoff], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        }).map_err(|e| format!("Failed to query contradictions: {}", e))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+        Ok(rows)
+    }
+
+    /// ノートの矛盾キャッシュを無効化（ノート編集時に呼ぶ）
+    pub fn clear_contradictions(&self, file_path: &str) -> Result<(), String> {
+        let conn = self.conn.lock().map_err(|e| format!("Lock error: {}", e))?;
+        conn.execute(
+            "DELETE FROM contradiction_cache WHERE file_a = ?1 OR file_b = ?1",
+            params![file_path],
+        ).map_err(|e| format!("Failed to clear contradictions: {}", e))?;
+        Ok(())
+    }
 }
 
 fn bytes_to_f32_vec(bytes: &[u8]) -> Vec<f32> {

@@ -75,6 +75,7 @@ pub fn run() {
             commands::get_model_path,
             commands::load_model,
             commands::generate_text,
+            commands::detect_contradictions,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -51,6 +51,7 @@ function App() {
   const [vaultPath, setVaultPath] = useState("");
 
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const contradictionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Initial load
   useEffect(() => {
     listFiles();
@@ -119,6 +120,18 @@ function App() {
         const annots = await getMarginAnnotations(selectedPath);
         setAnnotations(annots);
         refreshGit();
+
+        // ノート保存後、2 秒アイドルで矛盾検出を起動（仕様: contradiction_check_idle_ms）
+        if (contradictionTimer.current) clearTimeout(contradictionTimer.current);
+        contradictionTimer.current = setTimeout(async () => {
+          const contradictions = await invoke<typeof annots>("detect_contradictions", { path: selectedPath }).catch(() => []);
+          if (contradictions.length > 0) {
+            setAnnotations((prev) => [
+              ...prev.filter((a) => a.annotation_type !== "contradiction"),
+              ...contradictions,
+            ]);
+          }
+        }, 2000);
       }
     }, AUTO_SAVE_DELAY);
   }, [savedContent, selectedPath, saveFile, getMarginAnnotations]);

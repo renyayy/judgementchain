@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, State};
 use crate::AppState;
@@ -368,11 +369,11 @@ pub async fn log_activity(
 
 #[tauri::command]
 pub async fn get_margin_annotations(path: String, state: State<'_, AppState>) -> Result<Vec<MarginAnnotation>, String> {
-    // Stub: return related notes based on stored embeddings
-    // For now return an empty vec since we don't have real embedding computation yet
-    let similar = state.db.find_similar(&[], 3, &path)?;
+    // 1) 関連ノート（embedding 類似度）
+    let embedding = state.db.get_embedding(&path)?.unwrap_or_default();
+    let similar = state.db.find_similar(&embedding, 3, &path)?;
 
-    let annotations: Vec<MarginAnnotation> = similar.into_iter()
+    let mut annotations: Vec<MarginAnnotation> = similar.into_iter()
         .enumerate()
         .map(|(i, (file_path, similarity))| {
             let name = std::path::Path::new(&file_path)
@@ -383,15 +384,108 @@ pub async fn get_margin_annotations(path: String, state: State<'_, AppState>) ->
             MarginAnnotation {
                 id: format!("related_{}", i),
                 annotation_type: "related_note".to_string(),
-                icon: "link".to_string(),
+                icon: "💡".to_string(),
                 title: name,
-                content: format!("Similarity: {:.2}", similarity),
+                content: format!("類似度 {:.0}%", similarity * 100.0),
                 link: Some(file_path),
             }
         })
         .collect();
 
+    // 2) キャッシュ済み矛盾（TTL 1時間）
+    let contradictions = state.db.get_contradictions(&path)?;
+    for (i, (conflicting_path, description)) in contradictions.into_iter().enumerate() {
+        let name = std::path::Path::new(&conflicting_path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("Unknown")
+            .to_string();
+        annotations.push(MarginAnnotation {
+            id: format!("contradiction_{}", i),
+            annotation_type: "contradiction".to_string(),
+            icon: "⚡".to_string(),
+            title: name,
+            content: description,
+            link: Some(conflicting_path),
+        });
+    }
+
     Ok(annotations)
+}
+
+/// バックグラウンドで矛盾検出を実行し、結果をキャッシュに保存する。
+/// Gemma がロードされていない場合は即座に空を返す（graceful degradation）。
+#[tauri::command]
+pub async fn detect_contradictions(
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<MarginAnnotation>, String> {
+    // モデル未ロード時はスキップ
+    let llama = Arc::clone(&state.llama);
+    {
+        let guard = llama.lock().map_err(|e| format!("Lock error: {}", e))?;
+        if guard.is_none() {
+            return Ok(vec![]);
+        }
+    }
+
+    // 現在のノート内容を読む
+    let current_content = std::fs::read_to_string(&path)
+        .map_err(|e| format!("ノート読み込み失敗: {}", e))?;
+
+    // 既存キャッシュを無効化（再チェック）
+    state.db.clear_contradictions(&path)?;
+
+    // 類似ノートを取得（top 3）
+    let embedding = state.db.get_embedding(&path)?.unwrap_or_default();
+    let similar = state.db.find_similar(&embedding, 3, &path)?;
+    if similar.is_empty() {
+        return Ok(vec![]);
+    }
+
+    // 各類似ノートと矛盾チェック
+    let mut results: Vec<MarginAnnotation> = vec![];
+
+    for (similar_path, _) in similar {
+        let other_content = match std::fs::read_to_string(&similar_path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        let prompt = crate::ai::build_contradiction_prompt(&current_content, &other_content);
+        let similar_path_clone = similar_path.clone();
+        let llama_clone = Arc::clone(&state.llama);
+
+        // Gemma 推論（spawn_blocking でノンブロッキング）
+        let response = tokio::task::spawn_blocking(move || {
+            let guard = llama_clone.lock().map_err(|e| format!("Lock error: {}", e))?;
+            let llama_state = guard.as_ref().ok_or("モデル未ロード")?;
+            llama_state.generate(&prompt, 128, |_| {})
+        })
+        .await
+        .map_err(|e| format!("Task error: {}", e))??;
+
+        if let Some(description) = crate::ai::parse_contradiction_response(&response) {
+            // キャッシュに保存
+            let _ = state.db.store_contradiction(&path, &similar_path, &description);
+
+            let name = std::path::Path::new(&similar_path)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("Unknown")
+                .to_string();
+            results.push(MarginAnnotation {
+                id: format!("contradiction_{}", results.len()),
+                annotation_type: "contradiction".to_string(),
+                icon: "⚡".to_string(),
+                title: name,
+                content: description,
+                link: Some(similar_path_clone),
+            });
+        }
+    }
+
+    Ok(results)
 }
 
 #[tauri::command]

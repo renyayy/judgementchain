@@ -808,6 +808,19 @@ body.resizing * {
   line-height: 1.5;
 }
 
+/* カード種別ごとのアクセントカラー */
+.margin-card--related_note {
+  border-left: 3px solid #58a6ff;
+}
+.margin-card--contradiction {
+  border-left: 3px solid #f78166;
+  background: color-mix(in srgb, var(--bg-tertiary) 90%, #f78166 10%);
+}
+.margin-card--contradiction:hover {
+  background: color-mix(in srgb, var(--bg-hover) 85%, #f78166 15%);
+  border-color: #f78166;
+}
+
 /* Backlinks */
 .backlinks-list {
   display: flex;

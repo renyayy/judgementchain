@@ -138,6 +138,42 @@ impl LlamaState {
     }
 }
 
+// ─── 矛盾検出 ─────────────────────────────────────────────────────────────────
+
+/// 矛盾検出用のプロンプトを構築する（Gemma instruct フォーマット）。
+pub fn build_contradiction_prompt(current: &str, other: &str) -> String {
+    // 長いノートはトークン節約のため先頭 500 字に切り詰める
+    let cur = current.chars().take(500).collect::<String>();
+    let oth = other.chars().take(500).collect::<String>();
+    format!(
+        "<start_of_turn>user\n\
+         現在のノート:\n{cur}\n\n\
+         過去のノート:\n{oth}\n\n\
+         これらのノートに矛盾がありますか？\
+         「はい、矛盾があります：[理由を1文で]」または「いいえ、矛盾はありません」のどちらかで答えてください。\
+         <end_of_turn>\n<start_of_turn>model\n"
+    )
+}
+
+/// Gemma の出力から矛盾の説明を抽出する。
+/// "はい、矛盾があります：..." → Some(description)
+/// "いいえ..."                 → None
+pub fn parse_contradiction_response(response: &str) -> Option<String> {
+    let lower = response.trim().to_lowercase();
+    if lower.starts_with("はい") || lower.starts_with("yes") || lower.contains("矛盾があります") {
+        // コロン以降を説明として取り出す
+        let desc = response
+            .splitn(2, '：')
+            .nth(1)
+            .or_else(|| response.splitn(2, ':').nth(1))
+            .map(|s| s.trim().to_string())
+            .unwrap_or_else(|| response.trim().to_string());
+        Some(desc)
+    } else {
+        None
+    }
+}
+
 // ─── Ollama embedding (既存) ──────────────────────────────────────────────────
 
 /// Ollama の /api/embed エンドポイントを呼び出してembeddingを返す。
