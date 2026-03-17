@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, State};
 use crate::AppState;
@@ -474,7 +473,7 @@ pub async fn get_weekly_summary(state: State<'_, AppState>) -> Result<Option<Str
     state.db.get_weekly_summary(current_week_start())
 }
 
-/// Gemma を使って今週のサマリを生成・保存する。
+/// Candle を使って今週のサマリを生成・保存する。
 #[tauri::command]
 pub async fn generate_weekly_summary(state: State<'_, AppState>) -> Result<String, String> {
     let week_start = current_week_start();
@@ -493,12 +492,12 @@ pub async fn generate_weekly_summary(state: State<'_, AppState>) -> Result<Strin
     };
 
     let prompt = crate::ai::build_weekly_summary_prompt(&week_label, &activity);
-    let llama = Arc::clone(&state.llama);
+    let candle_arc = std::sync::Arc::clone(&state.candle);
 
     let summary = tokio::task::spawn_blocking(move || {
-        let guard = llama.lock().map_err(|e| format!("Lock error: {}", e))?;
-        let llama_state = guard.as_ref().ok_or("モデル未ロード")?;
-        llama_state.generate(&prompt, 256, |_| {})
+        let mut guard = candle_arc.lock().map_err(|e| format!("Lock error: {}", e))?;
+        let candle_state = guard.as_mut().ok_or("モデル未ロード")?;
+        candle_state.generate(&prompt, 256, |_| {})
     })
     .await
     .map_err(|e| format!("タスクエラー: {}", e))??;
@@ -508,16 +507,15 @@ pub async fn generate_weekly_summary(state: State<'_, AppState>) -> Result<Strin
 }
 
 /// バックグラウンドで矛盾検出を実行し、結果をキャッシュに保存する。
-/// Gemma がロードされていない場合は即座に空を返す（graceful degradation）。
+/// モデルがロードされていない場合は即座に空を返す（graceful degradation）。
 #[tauri::command]
 pub async fn detect_contradictions(
     path: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<MarginAnnotation>, String> {
     // モデル未ロード時はスキップ
-    let llama = Arc::clone(&state.llama);
     {
-        let guard = llama.lock().map_err(|e| format!("Lock error: {}", e))?;
+        let guard = state.candle.lock().map_err(|e| format!("Lock error: {}", e))?;
         if guard.is_none() {
             return Ok(vec![]);
         }
@@ -547,14 +545,13 @@ pub async fn detect_contradictions(
         };
 
         let prompt = crate::ai::build_contradiction_prompt(&current_content, &other_content);
-        let similar_path_clone = similar_path.clone();
-        let llama_clone = Arc::clone(&state.llama);
+        let candle_arc = std::sync::Arc::clone(&state.candle);
 
-        // Gemma 推論（spawn_blocking でノンブロッキング）
+        // Candle 推論（spawn_blocking でノンブロッキング）
         let response = tokio::task::spawn_blocking(move || {
-            let guard = llama_clone.lock().map_err(|e| format!("Lock error: {}", e))?;
-            let llama_state = guard.as_ref().ok_or("モデル未ロード")?;
-            llama_state.generate(&prompt, 128, |_| {})
+            let mut guard = candle_arc.lock().map_err(|e| format!("Lock error: {}", e))?;
+            let candle_state = guard.as_mut().ok_or("モデル未ロード")?;
+            candle_state.generate(&prompt, 128, |_| {})
         })
         .await
         .map_err(|e| format!("Task error: {}", e))??;
@@ -574,7 +571,7 @@ pub async fn detect_contradictions(
                 icon: "⚡".to_string(),
                 title: name,
                 content: description,
-                link: Some(similar_path_clone),
+                link: Some(similar_path.clone()),
             });
         }
     }
@@ -784,7 +781,7 @@ pub async fn get_model_path(app: tauri::AppHandle) -> Result<String, String> {
     Ok(path.to_string_lossy().to_string())
 }
 
-/// Gemma モデルをメモリにロードする（初回のみ / 重い処理）。
+/// Candle モデルをメモリにロードする（初回のみ / 重い処理）。
 /// フロントエンドはアプリ起動後の適切なタイミングで一度だけ呼ぶ。
 #[tauri::command]
 pub async fn load_model(
@@ -793,20 +790,20 @@ pub async fn load_model(
 ) -> Result<(), String> {
     // 既にロード済みならスキップ
     {
-        let guard = state.llama.lock().map_err(|e| format!("ロックエラー: {}", e))?;
+        let guard = state.candle.lock().map_err(|e| format!("ロックエラー: {}", e))?;
         if guard.is_some() {
             return Ok(());
         }
     }
 
     let model_path = crate::ai::get_bundled_model_path(&app)?;
-    let llama_arc = std::sync::Arc::clone(&state.llama);
+    let candle_arc = std::sync::Arc::clone(&state.candle);
 
     // モデルロードは重いので blocking スレッドで実行
     tokio::task::spawn_blocking(move || {
-        let llama_state = crate::ai::LlamaState::load(&model_path)?;
-        let mut guard = llama_arc.lock().map_err(|e| format!("ロックエラー: {}", e))?;
-        *guard = Some(llama_state);
+        let candle_state = crate::ai::CandleState::load(&model_path)?;
+        let mut guard = candle_arc.lock().map_err(|e| format!("ロックエラー: {}", e))?;
+        *guard = Some(candle_state);
         Ok::<(), String>(())
     })
     .await
@@ -815,7 +812,7 @@ pub async fn load_model(
     Ok(())
 }
 
-/// Gemma でテキストを生成する。
+/// Candle でテキストを生成する。
 /// トークンは "llm-token" イベントでストリーミング送信される。
 /// 戻り値は生成されたテキスト全体。
 #[tauri::command]
@@ -825,16 +822,16 @@ pub async fn generate_text(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<String, String> {
-    let llama_arc = std::sync::Arc::clone(&state.llama);
+    let candle_arc = std::sync::Arc::clone(&state.candle);
     let max_tokens = max_tokens.unwrap_or(512);
 
     let result = tokio::task::spawn_blocking(move || {
-        let guard = llama_arc.lock().map_err(|e| format!("ロックエラー: {}", e))?;
-        let llama = guard
-            .as_ref()
+        let mut guard = candle_arc.lock().map_err(|e| format!("ロックエラー: {}", e))?;
+        let candle = guard
+            .as_mut()
             .ok_or_else(|| "モデル未ロード。先に load_model を呼んでください".to_string())?;
 
-        llama.generate(&prompt, max_tokens, |piece| {
+        candle.generate(&prompt, max_tokens, |piece| {
             let _ = app.emit("llm-token", piece.to_string());
         })
     })

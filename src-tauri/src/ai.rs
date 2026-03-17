@@ -1,14 +1,10 @@
-/// AI バックエンド（llama.cpp ローカル推論 / Ollama フォールバック）
+/// AI バックエンド（Candle + GGUF ローカル推論）
 
-use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
-
-use llama_cpp_2::context::params::LlamaContextParams;
-use llama_cpp_2::llama_backend::LlamaBackend;
-use llama_cpp_2::llama_batch::LlamaBatch;
-use llama_cpp_2::model::params::LlamaModelParams;
-use llama_cpp_2::model::{AddBos, LlamaModel};
-use llama_cpp_2::sampling::LlamaSampler;
+use candle_core::{Device, Tensor};
+use candle_transformers::models::quantized_gemma3 as qgm;
+use candle_core::quantized::gguf_file;
+use tokenizers::Tokenizer;
 
 #[cfg(not(dev))]
 use tauri::Manager;
@@ -37,101 +33,146 @@ pub fn get_bundled_model_path(app: &tauri::AppHandle) -> Result<PathBuf, String>
     }
 }
 
-// ─── LlamaState ───────────────────────────────────────────────────────────────
+// ─── CandleState ──────────────────────────────────────────────────────────────
 
-/// llama.cpp バックエンドとロード済みモデルを保持する。
-/// `AppState` の `Arc<Mutex<Option<LlamaState>>>` に格納して使う。
-pub struct LlamaState {
-    backend: LlamaBackend,
-    model: LlamaModel,
+/// Candle モデルとトークナイザを保持する。
+/// `AppState` の `Arc<Mutex<Option<CandleState>>>` に格納して使う。
+pub struct CandleState {
+    model: qgm::ModelWeights,
+    tokenizer: Tokenizer,
+    device: Device,
+    model_path: PathBuf,
 }
 
-// llama-cpp-2 の raw pointer ラッパーはスレッド間で安全に渡せる
-unsafe impl Send for LlamaState {}
-unsafe impl Sync for LlamaState {}
+unsafe impl Send for CandleState {}
+unsafe impl Sync for CandleState {}
 
-impl LlamaState {
-    /// モデルファイルをロードして LlamaState を返す。
+impl CandleState {
+    /// GGUF モデルファイルをロードして CandleState を返す。
     /// 重いので spawn_blocking から呼ぶこと。
     pub fn load(model_path: &Path) -> Result<Self, String> {
-        let backend = LlamaBackend::init()
-            .map_err(|e| format!("llama backend 初期化失敗: {}", e))?;
+        // デバイス選択（macOS では Metal を試みる）
+        let device = Self::select_device()?;
 
-        let model_params = LlamaModelParams::default();
-        let model = LlamaModel::load_from_file(&backend, model_path, &model_params)
+        // GGUF ファイルを読み込む
+        let mut file = std::fs::File::open(model_path)
+            .map_err(|e| format!("モデルファイルを開けません: {}", e))?;
+        
+        let content = gguf_file::Content::read(&mut file)
+            .map_err(|e| format!("GGUF読み込み失敗: {}", e))?;
+        
+        let model = qgm::ModelWeights::from_gguf(content, &mut file, &device)
             .map_err(|e| format!("モデル読み込み失敗: {}", e))?;
 
-        Ok(Self { backend, model })
+        // トークナイザをロード（GGUF に埋め込まれている場合は抽出、なければ HF から取得）
+        let tokenizer = Self::load_tokenizer(model_path)?;
+
+        Ok(Self {
+            model,
+            tokenizer,
+            device,
+            model_path: model_path.to_path_buf(),
+        })
+    }
+
+    fn select_device() -> Result<Device, String> {
+        #[cfg(target_os = "macos")]
+        {
+            if let Ok(device) = Device::new_metal(0) {
+                return Ok(device);
+            }
+        }
+        Ok(Device::Cpu)
+    }
+
+    fn load_tokenizer(model_path: &Path) -> Result<Tokenizer, String> {
+        // まずモデルと同じディレクトリの tokenizer.json を探す
+        let dir = model_path.parent().unwrap_or(Path::new("."));
+        let tokenizer_path = dir.join("tokenizer.json");
+        
+        if tokenizer_path.exists() {
+            return Tokenizer::from_file(&tokenizer_path)
+                .map_err(|e| format!("トークナイザ読み込み失敗: {}", e));
+        }
+
+        // Gemma 用のデフォルトトークナイザを HF Hub から取得
+        let api = hf_hub::api::sync::Api::new()
+            .map_err(|e| format!("HF API 初期化失敗: {}", e))?;
+        let repo = api.model("google/gemma-3-1b-it".to_string());
+        let tokenizer_file = repo.get("tokenizer.json")
+            .map_err(|e| format!("トークナイザダウンロード失敗: {}", e))?;
+        
+        Tokenizer::from_file(&tokenizer_file)
+            .map_err(|e| format!("トークナイザ読み込み失敗: {}", e))
+    }
+
+    /// モデルパスを返す。
+    pub fn model_path(&self) -> &Path {
+        &self.model_path
     }
 
     /// プロンプトを渡してテキストを生成する。
     /// `on_token`: 各トークン生成時に呼ばれるコールバック（ストリーミング用）
     pub fn generate(
-        &self,
+        &mut self,
         prompt: &str,
         max_tokens: u32,
         on_token: impl Fn(&str),
     ) -> Result<String, String> {
-        let ctx_params = LlamaContextParams::default()
-            .with_n_ctx(NonZeroU32::new(2048));
-
-        let mut ctx = self
-            .model
-            .new_context(&self.backend, ctx_params)
-            .map_err(|e| format!("コンテキスト作成失敗: {}", e))?;
-
         // トークン化
-        let tokens_list = self
-            .model
-            .str_to_token(prompt, AddBos::Always)
+        let encoding = self.tokenizer
+            .encode(prompt, true)
             .map_err(|e| format!("トークン化失敗: {}", e))?;
-
-        let n_prompt = tokens_list.len() as i32;
-        let mut batch = LlamaBatch::new(512, 1);
-
-        for (i, &token) in tokens_list.iter().enumerate() {
-            let is_last = i == tokens_list.len() - 1;
-            batch
-                .add(token, i as i32, &[0], is_last)
-                .map_err(|e| format!("バッチ追加失敗: {}", e))?;
-        }
-
-        ctx.decode(&mut batch)
-            .map_err(|e| format!("プロンプトデコード失敗: {}", e))?;
-
-        let mut n_cur = n_prompt;
+        
+        let prompt_tokens = encoding.get_ids();
+        let mut tokens: Vec<u32> = prompt_tokens.to_vec();
+        
         let mut output = String::new();
-        let mut sampler = LlamaSampler::greedy();
-        // UTF-8 デコーダーを再利用してマルチバイト文字を正しく処理する
-        let mut decoder = encoding_rs::UTF_8.new_decoder();
+        let eos_token_id = self.tokenizer
+            .token_to_id("<eos>")
+            .or_else(|| self.tokenizer.token_to_id("</s>"))
+            .or_else(|| self.tokenizer.token_to_id("<|endoftext|>"))
+            .unwrap_or(2);
 
-        loop {
-            // 次トークンをサンプリング（-1 = 最後のトークン位置）
-            let new_token = sampler.sample(&ctx, -1);
-            sampler.accept(new_token);
-
+        for _i in 0..max_tokens {
+            // 入力テンソルを作成
+            let input = Tensor::new(&tokens[..], &self.device)
+                .map_err(|e| format!("テンソル作成失敗: {}", e))?
+                .unsqueeze(0)
+                .map_err(|e| format!("次元追加失敗: {}", e))?;
+            
+            // 推論
+            let logits = self.model
+                .forward(&input, tokens.len() - 1)
+                .map_err(|e| format!("推論失敗: {}", e))?;
+            
+            // 最後のトークンのロジットを取得
+            let logits = logits
+                .squeeze(0)
+                .map_err(|e| format!("squeeze失敗: {}", e))?;
+            let logits = logits
+                .get(logits.dim(0).map_err(|e| format!("dim取得失敗: {}", e))? - 1)
+                .map_err(|e| format!("logits取得失敗: {}", e))?;
+            
+            // Greedy サンプリング
+            let next_token = logits
+                .argmax(0)
+                .map_err(|e| format!("argmax失敗: {}", e))?
+                .to_scalar::<u32>()
+                .map_err(|e| format!("スカラー変換失敗: {}", e))?;
+            
             // 終了条件
-            if self.model.is_eog_token(new_token)
-                || n_cur >= n_prompt + max_tokens as i32
-            {
+            if next_token == eos_token_id {
                 break;
             }
-
-            // トークンを文字列に変換してコールバック呼び出し
-            if let Ok(piece) = self.model.token_to_piece(new_token, &mut decoder, false, None) {
+            
+            tokens.push(next_token);
+            
+            // トークンを文字列に変換
+            if let Ok(piece) = self.tokenizer.decode(&[next_token], false) {
                 on_token(&piece);
                 output.push_str(&piece);
             }
-
-            // 次のステップへ
-            batch.clear();
-            batch
-                .add(new_token, n_cur, &[0], true)
-                .map_err(|e| format!("バッチ追加失敗: {}", e))?;
-            ctx.decode(&mut batch)
-                .map_err(|e| format!("デコード失敗: {}", e))?;
-
-            n_cur += 1;
         }
 
         Ok(output)

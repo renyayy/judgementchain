@@ -9,3 +9,6 @@ doctor = "bun tauri info"
 # $ cp /path/to/gemma-3-1b-it-q4_0.gguf src-tauri/models/
 # $ mise run build
 build = "bun tauri build --config src-tauri/tauri.release.conf.json"
+
+[env]
+MACOSX_DEPLOYMENT_TARGET = "10.15"

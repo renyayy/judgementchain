@@ -14,8 +14,8 @@ use database::Database;
 pub struct AppState {
     pub config: Arc<RwLock<Config>>,
     pub db: Arc<Database>,
-    /// ロード済みの Gemma モデル（初回 load_model コマンドでセットされる）
-    pub llama: Arc<Mutex<Option<crate::ai::LlamaState>>>,
+    /// Candle モデル（初回 load_model コマンドでセットされる）
+    pub candle: Arc<Mutex<Option<crate::ai::CandleState>>>,
 }
 
 impl AppState {
@@ -25,7 +25,7 @@ impl AppState {
         Ok(Self {
             config: Arc::new(RwLock::new(config)),
             db: Arc::new(db),
-            llama: Arc::new(Mutex::new(None)),
+            candle: Arc::new(Mutex::new(None)),
         })
     }
 }
