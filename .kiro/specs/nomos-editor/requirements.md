@@ -235,7 +235,7 @@ Nomosは、ローカルLLMを活用した知識管理エディタです。ユー
 #### 受け入れ基準
 
 1. THE Application SHALL download and cache Gemma 3 1B GGUF model on first run
-2. THE Model SHALL be quantized to Q4_K_M format (approximately 600MB)
+2. THE Model SHALL be quantized to q4_0 format (approximately 600MB)
 3. WHEN inference is requested, THE Application SHALL load the model into memory and generate responses
 4. THE Inference_Engine SHALL support CPU-only execution
 5. WHEN inference completes, THE Application SHALL cache the result for 1 hour
@@ -373,7 +373,7 @@ Nomosは、ローカルLLMを活用した知識管理エディタです。ユー
 ### 制約
 
 1. **ローカル実行**: すべてのAI推論はローカルで実行される必要があります
-2. **モデルサイズ**: Gemma 3 1B GGUF（Q4_K_M）は600MB以下である必要があります
+2. **モデルサイズ**: Gemma 3 1B GGUF（q4_0）は600MB以下である必要があります
 3. **CPU動作**: GPU不要で、CPUのみで動作する必要があります
 4. **ファイルシステム**: Obsidian互換のファイル構造を維持する必要があります
 

@@ -33,3 +33,10 @@ sha2 = "0.10"
 hex = "0.4"
 dirs = "5"
 regex = "1"
+encoding_rs = "0.8"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+llama-cpp-2 = { version = "0.1", features = ["metal"] }
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+llama-cpp-2 = "0.1"

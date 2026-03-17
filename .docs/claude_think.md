@@ -122,7 +122,7 @@
 | フロントエンド | TypeScript + React | CodeMirror 6との親和性 |
 | エディタコア | CodeMirror 6 | 拡張性、パフォーマンス |
 | バックエンド | Rust | 推論・ファイルIO・Git操作の安定性 |
-| ローカルLLM | Gemma 3 1B GGUF（llama-cpp-2クレート経由） | CPUで動作、Q4_K_M量子化で600MB程度 |
+| ローカルLLM | Gemma 3 1B GGUF（llama-cpp-2クレート経由） | CPUで動作、q4_0量子化で600MB程度 |
 | Embedding | nomic-embed-text（軽量） | リアルタイム類似検索用 |
 | DB | SQLite（rusqlite） | 行動ログ・メタデータ管理 |
 | 全文検索 | tantivy | Rust製、高速 |
@@ -161,7 +161,7 @@ pub trait ModelBackend: Send + Sync {
 }
 
 // デフォルト実装：llama-cpp-2クレート経由
-// モデル：Gemma 3 1B GGUF (Q4_K_M量子化)
+// モデル：Gemma 3 1B GGUF (q4_0量子化)
 // HuggingFaceから取得: bartowski/gemma-3-1b-it-GGUF
 pub struct LlamaCppBackend {
     model: llama_cpp_2::model::LlamaModel,

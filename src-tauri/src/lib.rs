@@ -6,13 +6,15 @@ mod git;
 mod watcher;
 mod ai;
 
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use config::Config;
 use database::Database;
 
 pub struct AppState {
     pub config: Arc<RwLock<Config>>,
     pub db: Arc<Database>,
+    /// ロード済みの Gemma モデル（初回 load_model コマンドでセットされる）
+    pub llama: Arc<Mutex<Option<crate::ai::LlamaState>>>,
 }
 
 impl AppState {
@@ -22,6 +24,7 @@ impl AppState {
         Ok(Self {
             config: Arc::new(RwLock::new(config)),
             db: Arc::new(db),
+            llama: Arc::new(Mutex::new(None)),
         })
     }
 }
@@ -69,6 +72,9 @@ pub fn run() {
             commands::git_init,
             commands::embed_note,
             commands::get_similar_notes_for_margin,
+            commands::get_model_path,
+            commands::load_model,
+            commands::generate_text,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

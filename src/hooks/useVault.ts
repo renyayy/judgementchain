@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { notify } from "../lib/notifications";
 import type { FileEntry, NoteContent, MarginAnnotation, Backlink } from "../types";
 
 export function useVault() {
@@ -12,7 +13,7 @@ export function useVault() {
       const result = await invoke<FileEntry[]>("list_files", { path });
       setFiles(result);
     } catch (e) {
-      console.error("list_files error:", e);
+      notify(`ファイル一覧の取得に失敗しました: ${e}`, "error");
     } finally {
       setLoading(false);
     }
@@ -22,7 +23,7 @@ export function useVault() {
     try {
       return await invoke<NoteContent>("open_file", { path });
     } catch (e) {
-      console.error("open_file error:", e);
+      notify(`ファイルを開けませんでした: ${e}`, "error");
       return null;
     }
   }, []);
@@ -31,7 +32,7 @@ export function useVault() {
     try {
       return await invoke<boolean>("save_file", { path, content });
     } catch (e) {
-      console.error("save_file error:", e);
+      notify(`保存に失敗しました: ${e}`, "error");
       return false;
     }
   }, []);
@@ -42,7 +43,7 @@ export function useVault() {
       if (ok) await listFiles();
       return ok;
     } catch (e) {
-      console.error("create_file error:", e);
+      notify(`ファイルの作成に失敗しました: ${e}`, "error");
       return false;
     }
   }, [listFiles]);
@@ -53,7 +54,7 @@ export function useVault() {
       if (ok) await listFiles();
       return ok;
     } catch (e) {
-      console.error("create_dir error:", e);
+      notify(`フォルダの作成に失敗しました: ${e}`, "error");
       return false;
     }
   }, [listFiles]);
@@ -64,7 +65,7 @@ export function useVault() {
       if (ok) await listFiles();
       return ok;
     } catch (e) {
-      console.error("delete_file error:", e);
+      notify(`削除に失敗しました: ${e}`, "error");
       return false;
     }
   }, [listFiles]);
@@ -73,7 +74,7 @@ export function useVault() {
     try {
       return await invoke<MarginAnnotation[]>("get_similar_notes_for_margin", { path });
     } catch (e) {
-      console.error("get_similar_notes_for_margin error:", e);
+      notify(`マージン注釈の取得に失敗しました: ${e}`, "warning");
       return [];
     }
   }, []);
@@ -83,7 +84,7 @@ export function useVault() {
       const result = await invoke<{ links: Backlink[] }>("get_backlinks", { path });
       return result.links;
     } catch (e) {
-      console.error("get_backlinks error:", e);
+      notify(`バックリンクの取得に失敗しました: ${e}`, "warning");
       return [];
     }
   }, []);

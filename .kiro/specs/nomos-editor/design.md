@@ -268,7 +268,7 @@ pub struct LlamaCppBackend {
 impl LlamaCppBackend {
     pub async fn new(model_path: &Path) -> Result<Self> {
         // llama-cpp-2クレート経由でモデルをロード
-        // Gemma 3 1B GGUF (Q4_K_M) を使用
+        // Gemma 3 1B GGUF (q4_0) を使用
     }
 }
 ```
@@ -286,7 +286,7 @@ pub struct OllamaBackend {
 ```toml
 [ai]
 backend = "llamacpp"  # または "ollama"
-model_path = "~/.local/share/nomos/models/gemma-3-1b-it-q4_k_m.gguf"
+model_path = "~/.local/share/nomos/models/gemma-3-1b-it-q4_0.gguf"
 embedding_model = "nomic-embed-text"
 
 [ai.ollama]
@@ -337,7 +337,7 @@ pub struct SimilarNote {
 ```
 
 **パフォーマンス**:
-- ノートあたり5秒以内（Q4_K_M量子化モデル）
+- ノートあたり5秒以内（q4_0量子化モデル）
 - バックグラウンドで非同期実行
 - キャッシュにより重複計算を回避
 
@@ -571,7 +571,7 @@ auto_save_interval_ms = 1000
 
 [ai]
 backend = "llamacpp"  # "llamacpp" | "ollama"
-model_path = "~/.local/share/nomos/models/gemma-3-1b-it-q4_k_m.gguf"
+model_path = "~/.local/share/nomos/models/gemma-3-1b-it-q4_0.gguf"
 embedding_model = "nomic-embed-text"
 context_size = 2048
 
@@ -875,7 +875,7 @@ invoke('enable_auto_commit'): Promise<{ success: boolean }>
                           ▼
 ┌─────────────────────────────────────────────────────────────┐
 │ Layer 2: 1B推論（オンデマンド・バックグラウンド）           │
-│ ├─ Gemma 3 1B GGUF (Q4_K_M, 600MB)                         │
+│ ├─ Gemma 3 1B GGUF (q4_0, 600MB)                         │
 │ ├─ CPU動作（GPU不要）                                       │
 │ ├─ 矛盾検出・論文紐付け・質問応答に使用                     │
 │ ├─ ユーザーアイドル2秒後に実行                              │
@@ -930,7 +930,7 @@ impl BackgroundScheduler {
 
 **モデルダウンロード**:
 - HuggingFace: `bartowski/gemma-3-1b-it-GGUF`
-- ファイル: `gemma-3-1b-it-q4_k_m.gguf` (600MB)
+- ファイル: `gemma-3-1b-it-q4_0.gguf` (600MB)
 - 初回起動時に自動ダウンロード
 
 **推論パラメータ**:
@@ -1035,7 +1035,7 @@ CREATE INDEX idx_embeddings_updated ON note_embeddings(updated_at);
 ### メモリ管理
 
 - 最大メモリ使用量: 2GB
-- Gemmaモデル: 600MB（Q4_K_M量子化）
+- Gemmaモデル: 600MB（q4_0量子化）
 - Embedding キャッシュ: 最大1000ノート × 384次元 × 4bytes = 1.5MB
 - 行動ログ: 最大100,000エントリ × 100bytes = 10MB
 
@@ -1330,7 +1330,7 @@ async fn get_platform() -> String {
 
 ### プロパティ29: Gemmaモデルのダウンロード
 
-**For any** 初回起動時、Gemma 3 1B GGUF (Q4_K_M)モデルが自動的にダウンロードされ、キャッシュされる。
+**For any** 初回起動時、Gemma 3 1B GGUF (q4_0)モデルが自動的にダウンロードされ、キャッシュされる。
 
 **検証対象: 要件14.1, 14.2**
 
@@ -2153,7 +2153,7 @@ function renderConfigUI() {
 
 | リスク | 影響度 | 対策 |
 |---|---|---|
-| Gemma推論が遅い | 高 | Q4_K_M量子化、キャッシング、バックグラウンド実行 |
+| Gemma推論が遅い | 高 | q4_0量子化、キャッシング、バックグラウンド実行 |
 | メモリ不足 | 高 | メモリプーリング、段階的ロード、キャッシュ制限 |
 | ファイル競合 | 中 | ファイルロック、コンフリクト検出、マージ戦略 |
 | LSP接続失敗 | 低 | グレースフルデグラデーション、フォールバック |

@@ -4,3 +4,8 @@ rust = "latest"
 
 [tasks]
 doctor = "bun tauri info"
+
+# リリースビルド: モデルファイルを src-tauri/models/ に置いてから実行
+# $ cp /path/to/gemma-3-1b-it-q4_0.gguf src-tauri/models/
+# $ mise run build
+build = "bun tauri build --config src-tauri/tauri.release.conf.json"

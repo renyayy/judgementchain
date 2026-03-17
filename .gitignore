@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Gemma model file (large binary, not committed)
+src-tauri/models/*.gguf

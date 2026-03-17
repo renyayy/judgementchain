@@ -1,22 +1,171 @@
-/// AI バックエンド（Ollama / フォールバック）
+/// AI バックエンド（llama.cpp ローカル推論 / Ollama フォールバック）
+
+use std::num::NonZeroU32;
+use std::path::{Path, PathBuf};
+
+use llama_cpp_2::context::params::LlamaContextParams;
+use llama_cpp_2::llama_backend::LlamaBackend;
+use llama_cpp_2::llama_batch::LlamaBatch;
+use llama_cpp_2::model::params::LlamaModelParams;
+use llama_cpp_2::model::{AddBos, LlamaModel};
+use llama_cpp_2::sampling::LlamaSampler;
+
+#[cfg(not(dev))]
+use tauri::Manager;
+
+pub const GEMMA_MODEL_FILENAME: &str = "gemma-3-1b-it-q4_0.gguf";
+
+// ─── モデルパス ────────────────────────────────────────────────────────────────
+
+/// バンドルされたモデルファイルのパスを返す。
+/// - dev ビルド: `src-tauri/models/<filename>` を直接参照
+/// - release ビルド: Tauri リソースディレクトリを参照
+pub fn get_bundled_model_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    #[cfg(dev)]
+    {
+        let _ = app;
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        return Ok(manifest_dir.join("models").join(GEMMA_MODEL_FILENAME));
+    }
+    #[cfg(not(dev))]
+    {
+        let resource_dir = app
+            .path()
+            .resource_dir()
+            .map_err(|e| format!("リソースディレクトリの取得に失敗しました: {}", e))?;
+        Ok(resource_dir.join(GEMMA_MODEL_FILENAME))
+    }
+}
+
+// ─── LlamaState ───────────────────────────────────────────────────────────────
+
+/// llama.cpp バックエンドとロード済みモデルを保持する。
+/// `AppState` の `Arc<Mutex<Option<LlamaState>>>` に格納して使う。
+pub struct LlamaState {
+    backend: LlamaBackend,
+    model: LlamaModel,
+}
+
+// llama-cpp-2 の raw pointer ラッパーはスレッド間で安全に渡せる
+unsafe impl Send for LlamaState {}
+unsafe impl Sync for LlamaState {}
+
+impl LlamaState {
+    /// モデルファイルをロードして LlamaState を返す。
+    /// 重いので spawn_blocking から呼ぶこと。
+    pub fn load(model_path: &Path) -> Result<Self, String> {
+        let backend = LlamaBackend::init()
+            .map_err(|e| format!("llama backend 初期化失敗: {}", e))?;
+
+        let model_params = LlamaModelParams::default();
+        let model = LlamaModel::load_from_file(&backend, model_path, &model_params)
+            .map_err(|e| format!("モデル読み込み失敗: {}", e))?;
+
+        Ok(Self { backend, model })
+    }
+
+    /// プロンプトを渡してテキストを生成する。
+    /// `on_token`: 各トークン生成時に呼ばれるコールバック（ストリーミング用）
+    pub fn generate(
+        &self,
+        prompt: &str,
+        max_tokens: u32,
+        on_token: impl Fn(&str),
+    ) -> Result<String, String> {
+        let ctx_params = LlamaContextParams::default()
+            .with_n_ctx(NonZeroU32::new(2048));
+
+        let mut ctx = self
+            .model
+            .new_context(&self.backend, ctx_params)
+            .map_err(|e| format!("コンテキスト作成失敗: {}", e))?;
+
+        // トークン化
+        let tokens_list = self
+            .model
+            .str_to_token(prompt, AddBos::Always)
+            .map_err(|e| format!("トークン化失敗: {}", e))?;
+
+        let n_prompt = tokens_list.len() as i32;
+        let mut batch = LlamaBatch::new(512, 1);
+
+        for (i, &token) in tokens_list.iter().enumerate() {
+            let is_last = i == tokens_list.len() - 1;
+            batch
+                .add(token, i as i32, &[0], is_last)
+                .map_err(|e| format!("バッチ追加失敗: {}", e))?;
+        }
+
+        ctx.decode(&mut batch)
+            .map_err(|e| format!("プロンプトデコード失敗: {}", e))?;
+
+        let mut n_cur = n_prompt;
+        let mut output = String::new();
+        let mut sampler = LlamaSampler::greedy();
+        // UTF-8 デコーダーを再利用してマルチバイト文字を正しく処理する
+        let mut decoder = encoding_rs::UTF_8.new_decoder();
+
+        loop {
+            // 次トークンをサンプリング（-1 = 最後のトークン位置）
+            let new_token = sampler.sample(&ctx, -1);
+            sampler.accept(new_token);
+
+            // 終了条件
+            if self.model.is_eog_token(new_token)
+                || n_cur >= n_prompt + max_tokens as i32
+            {
+                break;
+            }
+
+            // トークンを文字列に変換してコールバック呼び出し
+            if let Ok(piece) = self.model.token_to_piece(new_token, &mut decoder, false, None) {
+                on_token(&piece);
+                output.push_str(&piece);
+            }
+
+            // 次のステップへ
+            batch.clear();
+            batch
+                .add(new_token, n_cur, &[0], true)
+                .map_err(|e| format!("バッチ追加失敗: {}", e))?;
+            ctx.decode(&mut batch)
+                .map_err(|e| format!("デコード失敗: {}", e))?;
+
+            n_cur += 1;
+        }
+
+        Ok(output)
+    }
+}
+
+// ─── Ollama embedding (既存) ──────────────────────────────────────────────────
 
 /// Ollama の /api/embed エンドポイントを呼び出してembeddingを返す。
 /// Ollamaが起動していない場合は None を返す（非ブロッキング）。
 pub fn embed_with_ollama(model: &str, text: &str) -> Option<Vec<f32>> {
     let url = "http://localhost:11434/api/embed";
-    let body = format!(r#"{{"model":"{}","input":"{}"}}"#,
+    let body = format!(
+        r#"{{"model":"{}","input":"{}"}}"#,
         model,
-        text.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n").replace('\r', "")
+        text.replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('\n', "\\n")
+            .replace('\r', "")
     );
 
     let response = std::process::Command::new("curl")
         .args([
             "-s",
-            "-X", "POST",
-            "-H", "Content-Type: application/json",
-            "-d", &body,
-            "--connect-timeout", "3",
-            "--max-time", "30",
+            "-X",
+            "POST",
+            "-H",
+            "Content-Type: application/json",
+            "-d",
+            &body,
+            "--connect-timeout",
+            "3",
+            "--max-time",
+            "30",
             url,
         ])
         .output()
@@ -31,22 +180,15 @@ pub fn embed_with_ollama(model: &str, text: &str) -> Option<Vec<f32>> {
 }
 
 fn parse_embedding_response(json: &str) -> Option<Vec<f32>> {
-    // {"embeddings":[[0.1, 0.2, ...]]}  (new API)
-    // {"embedding":[0.1, 0.2, ...]}      (old API)
     let json = json.trim();
-
-    // Try new format: "embeddings":[[...]]
     if let Some(start) = json.find("\"embeddings\":[[") {
         let after = &json[start + 15..];
         return parse_float_array(after);
     }
-
-    // Try old format: "embedding":[...]
     if let Some(start) = json.find("\"embedding\":[") {
         let after = &json[start + 13..];
         return parse_float_array(after);
     }
-
     None
 }
 
@@ -57,11 +199,14 @@ fn parse_float_array(s: &str) -> Option<Vec<f32>> {
         .split(',')
         .filter_map(|x| x.trim().parse::<f32>().ok())
         .collect();
-    if floats.is_empty() { None } else { Some(floats) }
+    if floats.is_empty() {
+        None
+    } else {
+        Some(floats)
+    }
 }
 
-/// テキストからembeddingを生成。backend設定に基づきOllamaを試行し、
-/// 失敗時は空を返す（graceful degradation）。
+/// テキストからembeddingを生成（backend設定に基づく）。
 pub fn generate_embedding(backend: &str, model: &str, text: &str) -> Option<Vec<f32>> {
     match backend {
         "ollama" => embed_with_ollama(model, text),

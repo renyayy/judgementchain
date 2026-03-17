@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{Emitter, State};
 use crate::AppState;
 use crate::config::Config;
 use crate::database::ActivityLog;
@@ -557,4 +557,71 @@ pub async fn get_history(path: String, limit: Option<usize>, state: State<'_, Ap
     }
 
     Ok(vec![])
+}
+
+/// バンドルされたモデルファイルのパスを返す
+#[tauri::command]
+pub async fn get_model_path(app: tauri::AppHandle) -> Result<String, String> {
+    let path = crate::ai::get_bundled_model_path(&app)?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+/// Gemma モデルをメモリにロードする（初回のみ / 重い処理）。
+/// フロントエンドはアプリ起動後の適切なタイミングで一度だけ呼ぶ。
+#[tauri::command]
+pub async fn load_model(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    // 既にロード済みならスキップ
+    {
+        let guard = state.llama.lock().map_err(|e| format!("ロックエラー: {}", e))?;
+        if guard.is_some() {
+            return Ok(());
+        }
+    }
+
+    let model_path = crate::ai::get_bundled_model_path(&app)?;
+    let llama_arc = std::sync::Arc::clone(&state.llama);
+
+    // モデルロードは重いので blocking スレッドで実行
+    tokio::task::spawn_blocking(move || {
+        let llama_state = crate::ai::LlamaState::load(&model_path)?;
+        let mut guard = llama_arc.lock().map_err(|e| format!("ロックエラー: {}", e))?;
+        *guard = Some(llama_state);
+        Ok::<(), String>(())
+    })
+    .await
+    .map_err(|e| format!("タスクエラー: {}", e))??;
+
+    Ok(())
+}
+
+/// Gemma でテキストを生成する。
+/// トークンは "llm-token" イベントでストリーミング送信される。
+/// 戻り値は生成されたテキスト全体。
+#[tauri::command]
+pub async fn generate_text(
+    prompt: String,
+    max_tokens: Option<u32>,
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<String, String> {
+    let llama_arc = std::sync::Arc::clone(&state.llama);
+    let max_tokens = max_tokens.unwrap_or(512);
+
+    let result = tokio::task::spawn_blocking(move || {
+        let guard = llama_arc.lock().map_err(|e| format!("ロックエラー: {}", e))?;
+        let llama = guard
+            .as_ref()
+            .ok_or_else(|| "モデル未ロード。先に load_model を呼んでください".to_string())?;
+
+        llama.generate(&prompt, max_tokens, |piece| {
+            let _ = app.emit("llm-token", piece.to_string());
+        })
+    })
+    .await
+    .map_err(|e| format!("タスクエラー: {}", e))??;
+
+    Ok(result)
 }

@@ -6,9 +6,12 @@ import { FileTree } from "./components/FileTree";
 import { Editor } from "./components/Editor";
 import { MarginPanel } from "./components/MarginPanel";
 import { GitPanel } from "./components/GitPanel";
+import { NotificationContainer } from "./components/NotificationContainer";
+import { AiChatPanel } from "./components/AiChatPanel";
 import { useVault } from "./hooks/useVault";
 import { useAppMenu } from "./hooks/useAppMenu";
 import { useGit } from "./hooks/useGit";
+import { useAI } from "./hooks/useAI";
 import { isViewableFile } from "./components/FileViewer";
 import type { MarginAnnotation, Backlink } from "./types";
 import "./App.css";
@@ -37,6 +40,9 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [marginOpen, setMarginOpen] = useState(true);
   const [gitOpen, setGitOpen] = useState(false);
+  const [aiOpen, setAiOpen] = useState(false);
+
+  const { modelStatus, messages, isGenerating, loadModel, generateText, clearMessages } = useAI();
 
   const { status: gitStatus, commits: gitCommits, refresh: refreshGit,
     stage: gitStage, unstage: gitUnstage, commit: gitCommit, initRepo: gitInit } = useGit();
@@ -45,7 +51,6 @@ function App() {
   const [vaultPath, setVaultPath] = useState("");
 
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   // Initial load
   useEffect(() => {
     listFiles();
@@ -203,6 +208,7 @@ function App() {
 
   return (
     <div className="app">
+      <NotificationContainer />
       <header className="app-header">
         <div className="app-header-left">
           <button
@@ -222,6 +228,13 @@ function App() {
             title="Git"
           >
             ⎇
+          </button>
+          <button
+            className={`header-btn ${aiOpen ? "active" : ""}`}
+            onClick={() => setAiOpen((v) => !v)}
+            title="AI Chat (Gemma)"
+          >
+            ✦
           </button>
           <button
             className="header-btn"
@@ -268,6 +281,17 @@ function App() {
             onUnstage={gitUnstage}
             onCommit={gitCommit}
             onInit={gitInit}
+          />
+        )}
+
+        {aiOpen && (
+          <AiChatPanel
+            modelStatus={modelStatus}
+            messages={messages}
+            isGenerating={isGenerating}
+            onLoadModel={loadModel}
+            onGenerate={generateText}
+            onClear={clearMessages}
           />
         )}
 
