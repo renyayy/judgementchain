@@ -33,6 +33,16 @@ export interface Config {
   };
 }
 
+export interface EditorTab {
+  id: string;
+  path: string;
+  content: string;
+  savedContent: string;
+  isDirty: boolean;
+  annotations: MarginAnnotation[];
+  backlinks: Backlink[];
+}
+
 export interface GitFileStatus {
   path: string;
   status: string; // M, A, D, ?, R

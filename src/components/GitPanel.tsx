@@ -140,6 +140,107 @@ function RefBadges({ refs }: { refs: string }) {
   );
 }
 
+// ---- Commit detail --------------------------------------------------------
+
+interface ParsedCommit {
+  hash: string;
+  author: string;
+  date: string;
+  message: string;
+  statLines: string[];
+  diffLines: string[];
+}
+
+function parseCommitShow(raw: string): ParsedCommit {
+  const lines = raw.split("\n");
+  let i = 0;
+  let hash = "", author = "", date = "";
+
+  if (lines[i]?.startsWith("commit ")) { hash = lines[i].slice(7).trim(); i++; }
+  while (i < lines.length && lines[i] !== "") {
+    if (lines[i].startsWith("Author:")) author = lines[i].replace("Author:", "").trim();
+    else if (lines[i].startsWith("Date:"))  date   = lines[i].replace("Date:", "").trim();
+    i++;
+  }
+  i++; // blank line after header
+
+  // commit message (indented 4 spaces)
+  const msgLines: string[] = [];
+  while (i < lines.length && lines[i] !== "") {
+    msgLines.push(lines[i].replace(/^ {4}/, ""));
+    i++;
+  }
+  const message = msgLines.join("\n").trim();
+  i++; // blank line after message
+
+  // stat lines come before "diff --git"
+  const statLines: string[] = [];
+  while (i < lines.length && !lines[i].startsWith("diff --git")) {
+    if (lines[i].trim()) statLines.push(lines[i]);
+    i++;
+  }
+
+  const diffLines = lines.slice(i);
+  return { hash, author, date, message, statLines, diffLines };
+}
+
+function StatLine({ line }: { line: string }) {
+  // "src/foo.ts | 12 +++---"  →  name | bar
+  const match = line.match(/^(.+?)\s*\|\s*(\d+)\s*([+\-]*)$/);
+  if (!match) return <div className="git-stat-other">{line}</div>;
+  const [, name, count, signs] = match;
+  const adds = (signs.match(/\+/g) ?? []).length;
+  const dels = (signs.match(/-/g) ?? []).length;
+  const total = adds + dels || 1;
+  return (
+    <div className="git-stat-row">
+      <span className="git-stat-name">{name.trim()}</span>
+      <span className="git-stat-count">{count}</span>
+      <span className="git-stat-bar">
+        {adds > 0 && <span className="git-stat-add" style={{ width: `${(adds / total) * 80}px` }} />}
+        {dels > 0 && <span className="git-stat-del" style={{ width: `${(dels / total) * 80}px` }} />}
+      </span>
+    </div>
+  );
+}
+
+function CommitDetail({ raw, onClose }: { raw: string; onClose: () => void }) {
+  const { hash, author, date, message, statLines, diffLines } = parseCommitShow(raw);
+  const shortHash = hash.slice(0, 8);
+
+  return (
+    <div className="git-diff-view">
+      <div className="git-diff-header">
+        <span className="git-diff-path" title={hash}>{shortHash}</span>
+        <button className="git-icon-btn" onClick={onClose} title="閉じる">✕</button>
+      </div>
+      <div className="git-diff-body">
+        {/* メタ情報 */}
+        <div className="git-commit-card">
+          <div className="git-commit-card-msg">{message || "(no message)"}</div>
+          <div className="git-commit-card-meta">
+            <span className="git-commit-card-author">{author}</span>
+            <span className="git-commit-card-date">{date}</span>
+          </div>
+          <div className="git-commit-card-hash">{hash}</div>
+        </div>
+
+        {/* 変更ファイル統計 */}
+        {statLines.length > 0 && (
+          <div className="git-stat-block">
+            {statLines.map((l, i) => <StatLine key={i} line={l} />)}
+          </div>
+        )}
+
+        {/* diff 本体（ファイルごとにアコーディオン） */}
+        {parseFileDiffs(diffLines).map((f, i) => (
+          <FileDiffSection key={i} file={f} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ---- Main component -------------------------------------------------------
 
 interface GitPanelProps {
@@ -158,13 +259,64 @@ function diffLineClass(line: string): string {
   if (line.startsWith("+") && !line.startsWith("+++")) return "git-diff-add";
   if (line.startsWith("-") && !line.startsWith("---")) return "git-diff-del";
   if (line.startsWith("@@")) return "git-diff-hunk";
-  if (line.startsWith("diff ") || line.startsWith("index ") || line.startsWith("---") || line.startsWith("+++")) return "git-diff-meta";
+  if (line.startsWith("diff ") || line.startsWith("index ") || line.startsWith("---") || line.startsWith("+++") || line.startsWith("new file") || line.startsWith("deleted file")) return "git-diff-meta";
   return "git-diff-ctx";
 }
 
+interface FileDiff {
+  filename: string;
+  lines: string[];
+}
+
+function parseFileDiffs(lines: string[]): FileDiff[] {
+  const files: FileDiff[] = [];
+  let current: FileDiff | null = null;
+  for (const line of lines) {
+    if (line.startsWith("diff --git ")) {
+      if (current) files.push(current);
+      const m = line.match(/diff --git a\/.+ b\/(.+)/);
+      current = { filename: m ? m[1] : line, lines: [] };
+    } else if (current) {
+      current.lines.push(line);
+    }
+  }
+  if (current) files.push(current);
+  return files;
+}
+
+function FileDiffSection({ file }: { file: FileDiff }) {
+  const [open, setOpen] = useState(true);
+  const adds = file.lines.filter((l) => l.startsWith("+") && !l.startsWith("+++")).length;
+  const dels = file.lines.filter((l) => l.startsWith("-") && !l.startsWith("---")).length;
+  const shortName = file.filename.split("/").pop() ?? file.filename;
+
+  return (
+    <div className="file-diff-section">
+      <div className="file-diff-toggle-row" onClick={() => setOpen((v) => !v)}>
+        <span className="file-diff-chevron">{open ? "▾" : "▸"}</span>
+        <span className="file-diff-filename" title={file.filename}>{shortName}</span>
+        {adds > 0 && <span className="file-diff-adds">+{adds}</span>}
+        {dels > 0 && <span className="file-diff-dels">-{dels}</span>}
+      </div>
+      {open && (
+        <div className="file-diff-body">
+          {file.lines.map((line, i) => (
+            <div key={i} className={`git-diff-line ${diffLineClass(line)}`}>
+              {line || "\u00a0"}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DiffView({ path, content, onClose }: { path: string; content: string; onClose: () => void }) {
-  const lines = content.split("\n");
   const name = path.split("/").pop() ?? path;
+  const fileDiffs = parseFileDiffs(content.split("\n"));
+  // synthetic diff (untracked file: starts with "+++")
+  const isSynthetic = !content.includes("diff --git");
+
   return (
     <div className="git-diff-view">
       <div className="git-diff-header">
@@ -172,14 +324,16 @@ function DiffView({ path, content, onClose }: { path: string; content: string; o
         <button className="git-icon-btn" onClick={onClose} title="閉じる">✕</button>
       </div>
       <div className="git-diff-body">
-        {content.trim() ? (
-          lines.map((line, i) => (
+        {!content.trim() ? (
+          <div className="git-empty">差分なし</div>
+        ) : isSynthetic ? (
+          content.split("\n").map((line, i) => (
             <div key={i} className={`git-diff-line ${diffLineClass(line)}`}>
               {line || "\u00a0"}
             </div>
           ))
         ) : (
-          <div className="git-empty">差分なし</div>
+          fileDiffs.map((f, i) => <FileDiffSection key={i} file={f} />)
         )}
       </div>
     </div>
@@ -348,9 +502,8 @@ export function GitPanel({ status, commits, onRefresh, onStage, onUnstage, onCom
           {tab === "history" && (
             <div className="git-history">
               {activeCommit ? (
-                <DiffView
-                  path={activeCommit.message}
-                  content={activeCommit.content}
+                <CommitDetail
+                  raw={activeCommit.content}
                   onClose={() => setActiveCommit(null)}
                 />
               ) : (

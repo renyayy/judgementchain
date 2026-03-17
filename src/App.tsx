@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { FileTree } from "./components/FileTree";
 import { Editor } from "./components/Editor";
+import { TabBar } from "./components/TabBar";
 import { MarginPanel } from "./components/MarginPanel";
 import { GitPanel } from "./components/GitPanel";
 import { NotificationContainer } from "./components/NotificationContainer";
@@ -13,10 +14,13 @@ import { useAppMenu } from "./hooks/useAppMenu";
 import { useGit } from "./hooks/useGit";
 import { useAI } from "./hooks/useAI";
 import { isViewableFile } from "./components/FileViewer";
-import type { MarginAnnotation, Backlink } from "./types";
+import type { EditorTab, MarginAnnotation } from "./types";
 import "./App.css";
 
 const AUTO_SAVE_DELAY = 1000;
+
+let tabCounter = 0;
+function newTabId() { return `tab-${++tabCounter}`; }
 
 function App() {
   const {
@@ -31,19 +35,16 @@ function App() {
     getBacklinks,
   } = useVault();
 
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const [content, setContent] = useState("");
-  const [savedContent, setSavedContent] = useState("");
-  const [isDirty, setIsDirty] = useState(false);
-  const [annotations, setAnnotations] = useState<MarginAnnotation[]>([]);
-  const [backlinks, setBacklinks] = useState<Backlink[]>([]);
+  const [tabs, setTabs] = useState<EditorTab[]>([]);
+  const [activeTabId, setActiveTabId] = useState<string | null>(null);
+  const activeTab = tabs.find((t) => t.id === activeTabId) ?? null;
+
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [marginOpen, setMarginOpen] = useState(true);
   const [gitOpen, setGitOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
 
   const { modelStatus, messages, isGenerating, loadModel, generateText, clearMessages } = useAI();
-
   const { status: gitStatus, commits: gitCommits, refresh: refreshGit,
     stage: gitStage, unstage: gitUnstage, commit: gitCommit, initRepo: gitInit } = useGit();
   const [folderExpandSignal, setFolderExpandSignal] = useState<boolean | null>(null);
@@ -52,7 +53,10 @@ function App() {
 
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const contradictionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Initial load
+  // activeTabId を ref でも保持（クロージャ内から参照するため）
+  const activeTabIdRef = useRef<string | null>(null);
+  activeTabIdRef.current = activeTabId;
+
   useEffect(() => {
     listFiles();
     invoke<{ vault: { path: string } }>("get_config").then((cfg) => {
@@ -63,7 +67,6 @@ function App() {
     refreshGit();
   }, [listFiles]);
 
-  // ファイル変更監視（外部編集の自動検出）
   useEffect(() => {
     const unlisten = listen("vault:changed", () => {
       listFiles();
@@ -73,68 +76,112 @@ function App() {
   }, [listFiles, refreshGit]);
 
   const handleSelectFile = useCallback(async (path: string) => {
-    if (isDirty && selectedPath) {
-      await saveFile(selectedPath, content);
+    // 既に開いているタブがあればそちらへ切り替え
+    const existing = tabs.find((t) => t.path === path);
+    if (existing) {
+      setActiveTabId(existing.id);
+      return;
     }
 
-    // 画像・PDF はファイル読み込み不要、パスだけセット
     if (isViewableFile(path)) {
-      setSelectedPath(path);
-      setContent("");
-      setSavedContent("");
-      setIsDirty(false);
-      setAnnotations([]);
-      setBacklinks([]);
+      const id = newTabId();
+      setTabs((prev) => [...prev, {
+        id, path, content: "", savedContent: "", isDirty: false, annotations: [], backlinks: [],
+      }]);
+      setActiveTabId(id);
       return;
     }
 
     const note = await openFile(path);
-    if (note) {
-      setSelectedPath(path);
-      setContent(note.content);
-      setSavedContent(note.content);
-      setIsDirty(false);
+    if (!note) return;
 
-      const [annots, bls] = await Promise.all([
-        getMarginAnnotations(path),
-        getBacklinks(path),
-      ]);
-      setAnnotations(annots);
-      setBacklinks(bls);
+    const [annots, bls] = await Promise.all([
+      getMarginAnnotations(path),
+      getBacklinks(path),
+    ]);
+
+    const id = newTabId();
+    setTabs((prev) => [...prev, {
+      id,
+      path,
+      content: note.content,
+      savedContent: note.content,
+      isDirty: false,
+      annotations: annots,
+      backlinks: bls,
+    }]);
+    setActiveTabId(id);
+  }, [tabs, openFile, getMarginAnnotations, getBacklinks]);
+
+  const handleCloseTab = useCallback(async (id: string) => {
+    const tab = tabs.find((t) => t.id === id);
+    if (tab?.isDirty) {
+      await saveFile(tab.path, tab.content);
     }
-  }, [isDirty, selectedPath, content, openFile, saveFile, getMarginAnnotations, getBacklinks]);
+
+    setTabs((prev) => {
+      const next = prev.filter((t) => t.id !== id);
+      if (activeTabIdRef.current === id) {
+        // 隣のタブへ移動
+        const idx = prev.findIndex((t) => t.id === id);
+        const nextActive = next[Math.min(idx, next.length - 1)]?.id ?? null;
+        setActiveTabId(nextActive);
+      }
+      return next;
+    });
+  }, [tabs, saveFile]);
+
+  const handleSwitchTab = useCallback((id: string) => {
+    setActiveTabId(id);
+  }, []);
 
   const handleEditorChange = useCallback((value: string) => {
-    setContent(value);
-    setIsDirty(value !== savedContent);
+    const id = activeTabIdRef.current;
+    if (!id) return;
 
-    // Auto-save
+    setTabs((prev) => prev.map((t) =>
+      t.id === id ? { ...t, content: value, isDirty: value !== t.savedContent } : t
+    ));
+
     if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
     autoSaveTimer.current = setTimeout(async () => {
-      if (selectedPath) {
-        await saveFile(selectedPath, value);
-        setSavedContent(value);
-        setIsDirty(false);
+      const tabId = activeTabIdRef.current;
+      if (!tabId) return;
 
-        // Refresh annotations and git status after save
-        const annots = await getMarginAnnotations(selectedPath);
-        setAnnotations(annots);
-        refreshGit();
+      // 最新のタブ情報を取得
+      setTabs((prev) => {
+        const tab = prev.find((t) => t.id === tabId);
+        if (!tab) return prev;
 
-        // ノート保存後、2 秒アイドルで矛盾検出を起動（仕様: contradiction_check_idle_ms）
-        if (contradictionTimer.current) clearTimeout(contradictionTimer.current);
-        contradictionTimer.current = setTimeout(async () => {
-          const contradictions = await invoke<typeof annots>("detect_contradictions", { path: selectedPath }).catch(() => []);
-          if (contradictions.length > 0) {
-            setAnnotations((prev) => [
-              ...prev.filter((a) => a.annotation_type !== "contradiction"),
-              ...contradictions,
-            ]);
-          }
-        }, 2000);
-      }
+        saveFile(tab.path, tab.content).then(async () => {
+          const annots = await getMarginAnnotations(tab.path);
+          refreshGit();
+
+          setTabs((cur) => cur.map((t) =>
+            t.id === tabId ? { ...t, savedContent: t.content, isDirty: false, annotations: annots } : t
+          ));
+
+          if (contradictionTimer.current) clearTimeout(contradictionTimer.current);
+          contradictionTimer.current = setTimeout(async () => {
+            const contradictions = await invoke<MarginAnnotation[]>("detect_contradictions", { path: tab.path }).catch(() => []);
+            if (contradictions.length > 0) {
+              setTabs((cur) => cur.map((t) =>
+                t.id === tabId ? {
+                  ...t,
+                  annotations: [
+                    ...t.annotations.filter((a) => a.annotation_type !== "contradiction"),
+                    ...contradictions,
+                  ],
+                } : t
+              ));
+            }
+          }, 2000);
+        });
+
+        return prev;
+      });
     }, AUTO_SAVE_DELAY);
-  }, [savedContent, selectedPath, saveFile, getMarginAnnotations]);
+  }, [saveFile, getMarginAnnotations, refreshGit]);
 
   const handleCreate = useCallback(async (name: string) => {
     await createFile(name);
@@ -148,15 +195,19 @@ function App() {
 
   const handleDelete = useCallback(async (path: string) => {
     await deleteFile(path);
-    if (selectedPath === path) {
-      setSelectedPath(null);
-      setContent("");
-      setSavedContent("");
-      setIsDirty(false);
-      setAnnotations([]);
-      setBacklinks([]);
+    // 開いているタブを閉じる
+    const tab = tabs.find((t) => t.path === path);
+    if (tab) {
+      setTabs((prev) => {
+        const next = prev.filter((t) => t.id !== tab.id);
+        if (activeTabIdRef.current === tab.id) {
+          const idx = prev.findIndex((t) => t.id === tab.id);
+          setActiveTabId(next[Math.min(idx, next.length - 1)]?.id ?? null);
+        }
+        return next;
+      });
     }
-  }, [deleteFile, selectedPath]);
+  }, [deleteFile, tabs]);
 
   const handleOpenNote = useCallback((path: string) => {
     handleSelectFile(path);
@@ -171,11 +222,8 @@ function App() {
     await invoke("update_config", {
       config: { ...currentConfig, vault: { ...vault, path: dir } }
     });
-    setSelectedPath(null);
-    setContent("");
-    setSavedContent("");
-    setAnnotations([]);
-    setBacklinks([]);
+    setTabs([]);
+    setActiveTabId(null);
     const p1 = dir.replace(/\/$/, "");
     setVaultPath(p1);
     setVaultName(p1.split("/").pop() ?? p1);
@@ -188,7 +236,6 @@ function App() {
   }, []);
 
   const handleNewNote = useCallback(() => {
-    // FileTree の新規入力を開くため、カスタムイベントで通知
     window.dispatchEvent(new CustomEvent("nomos:new-note"));
   }, []);
 
@@ -201,11 +248,8 @@ function App() {
     await invoke("update_config", {
       config: { ...currentConfig, vault: { ...vault, path: dir } }
     });
-    setSelectedPath(null);
-    setContent("");
-    setSavedContent("");
-    setAnnotations([]);
-    setBacklinks([]);
+    setTabs([]);
+    setActiveTabId(null);
     const p2 = dir.replace(/\/$/, "");
     setVaultPath(p2);
     setVaultName(p2.split("/").pop() ?? p2);
@@ -234,7 +278,7 @@ function App() {
           <span className="app-title">Nomos</span>
         </div>
         <div className="app-header-right">
-          {isDirty && <span className="save-indicator">未保存</span>}
+          {activeTab?.isDirty && <span className="save-indicator">未保存</span>}
           <button
             className={`header-btn ${gitOpen ? "active" : ""}`}
             onClick={() => setGitOpen((v) => !v)}
@@ -259,11 +303,18 @@ function App() {
         </div>
       </header>
 
+      <TabBar
+        tabs={tabs}
+        activeId={activeTabId}
+        onSwitch={handleSwitchTab}
+        onClose={handleCloseTab}
+      />
+
       <div className="app-body">
         {sidebarOpen && (
           <FileTree
             files={files}
-            selectedPath={selectedPath}
+            selectedPath={activeTab?.path ?? null}
             forceExpanded={folderExpandSignal}
             vaultName={vaultName}
             vaultPath={vaultPath}
@@ -277,9 +328,9 @@ function App() {
 
         <main className="editor-main">
           <Editor
-            content={content}
-            filePath={selectedPath}
-            isDirty={isDirty}
+            content={activeTab?.content ?? ""}
+            filePath={activeTab?.path ?? null}
+            isDirty={activeTab?.isDirty ?? false}
             onChange={handleEditorChange}
             onNavigate={handleOpenNote}
           />
@@ -310,8 +361,8 @@ function App() {
 
         {marginOpen && (
           <MarginPanel
-            annotations={annotations}
-            backlinks={backlinks}
+            annotations={activeTab?.annotations ?? []}
+            backlinks={activeTab?.backlinks ?? []}
             onOpenNote={handleOpenNote}
           />
         )}
