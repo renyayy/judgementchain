@@ -25,3 +25,8 @@ dist-ssr
 
 # Gemma model file (large binary, not committed)
 src-tauri/models/*.gguf
+
+# Release files
+src-tauri/target/release/bundle/
+judgement-brain.app.zip
+judgement-brain_{{version}}_aarch64.dmg

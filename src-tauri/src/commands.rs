@@ -777,7 +777,8 @@ pub async fn get_history(path: String, limit: Option<usize>, state: State<'_, Ap
 /// バンドルされたモデルファイルのパスを返す
 #[tauri::command]
 pub async fn get_model_path(app: tauri::AppHandle) -> Result<String, String> {
-    let path = crate::ai::get_bundled_model_path(&app)?;
+    // config はフロント側から取得できるが、ここでは「バンドル or デフォルト」の解決結果を返す
+    let path = crate::ai::resolve_model_path(&app, None)?;
     Ok(path.to_string_lossy().to_string())
 }
 
@@ -796,7 +797,15 @@ pub async fn load_model(
         }
     }
 
-    let model_path = crate::ai::get_bundled_model_path(&app)?;
+    let configured_model_path = {
+        let config = state
+            .config
+            .read()
+            .map_err(|e| format!("Config lock error: {}", e))?;
+        config.ai.model_path.clone()
+    };
+
+    let model_path = crate::ai::resolve_model_path(&app, Some(&configured_model_path))?;
     let candle_arc = std::sync::Arc::clone(&state.candle);
 
     // モデルロードは重いので blocking スレッドで実行

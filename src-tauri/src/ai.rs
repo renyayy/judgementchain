@@ -33,6 +33,47 @@ pub fn get_bundled_model_path(app: &tauri::AppHandle) -> Result<PathBuf, String>
     }
 }
 
+/// 設定されたモデルパス（任意）とバンドル済みモデルパスから、実際に存在するものを解決する。
+///
+/// 優先順位:
+/// 1) `configured_model_path`（空文字は無視、`~` 展開あり）
+/// 2) `get_bundled_model_path(app)`
+pub fn resolve_model_path(
+    app: &tauri::AppHandle,
+    configured_model_path: Option<&str>,
+) -> Result<PathBuf, String> {
+    let mut tried: Vec<PathBuf> = Vec::new();
+
+    if let Some(p) = configured_model_path {
+        let trimmed = p.trim();
+        if !trimmed.is_empty() {
+            let expanded = crate::config::expand_tilde(trimmed);
+            tried.push(expanded.clone());
+            if expanded.exists() {
+                return Ok(expanded);
+            }
+        }
+    }
+
+    let bundled = get_bundled_model_path(app)?;
+    tried.push(bundled.clone());
+    if bundled.exists() {
+        return Ok(bundled);
+    }
+
+    let tried_lines = tried
+        .into_iter()
+        .map(|p| format!("- {}", p.to_string_lossy()))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    Err(format!(
+        "モデルファイルが見つかりません。\n探したパス:\n{}\n\n対処:\n- dev の場合: `src-tauri/models/{}` に GGUF を置く\n- もしくは設定 `ai.model_path` に実ファイルパスを指定する",
+        tried_lines,
+        GEMMA_MODEL_FILENAME
+    ))
+}
+
 // ─── CandleState ──────────────────────────────────────────────────────────────
 
 /// Candle モデルとトークナイザを保持する。
