@@ -30,3 +30,5 @@ src-tauri/models/*.gguf
 src-tauri/target/release/bundle/
 judgement-brain.app.zip
 judgement-brain_{{version}}_aarch64.dmg
+
+.env.mise

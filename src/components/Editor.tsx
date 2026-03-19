@@ -1,15 +1,12 @@
-import { useState, useMemo } from "react";
+import { Suspense, lazy, useState } from "react";
 import { FileViewer, isViewableFile } from "./FileViewer";
-import CodeMirror from "@uiw/react-codemirror";
-import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
-import { languages } from "@codemirror/language-data";
-import { oneDark } from "@codemirror/theme-one-dark";
-import { EditorView } from "@codemirror/view";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import rehypeHighlight from "rehype-highlight";
-import "highlight.js/styles/github-dark.css";
-import { wikilinkPlugin, wikilinkClickHandler } from "../extensions/wikilinks";
+
+const MarkdownCodeEditor = lazy(() =>
+  import("./MarkdownCodeEditor").then((m) => ({ default: m.MarkdownCodeEditor })),
+);
+const MarkdownPreview = lazy(() =>
+  import("./MarkdownPreview").then((m) => ({ default: m.MarkdownPreview })),
+);
 
 type ViewMode = "edit" | "split" | "preview";
 
@@ -21,38 +18,7 @@ interface EditorProps {
   onNavigate?: (link: string) => void;
 }
 
-const editorTheme = EditorView.theme({
-  "&": {
-    height: "100%",
-    fontSize: "14px",
-  },
-  ".cm-scroller": {
-    overflow: "auto",
-    fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-    lineHeight: "1.7",
-  },
-  ".cm-content": {
-    padding: "16px 20px",
-    maxWidth: "760px",
-    margin: "0 auto",
-  },
-  ".cm-line": {
-    padding: "0",
-  },
-});
-
-const baseExtensions = [
-  markdown({ base: markdownLanguage, codeLanguages: languages }),
-  editorTheme,
-  EditorView.lineWrapping,
-  wikilinkPlugin,
-];
-
 export function Editor({ content, filePath, isDirty, onChange, onNavigate }: EditorProps) {
-  const extensions = useMemo(() => [
-    ...baseExtensions,
-    ...(onNavigate ? [wikilinkClickHandler(onNavigate)] : []),
-  ], [onNavigate]);
   const [viewMode, setViewMode] = useState<ViewMode>("edit");
 
   if (!filePath) {
@@ -115,50 +81,17 @@ export function Editor({ content, filePath, isDirty, onChange, onNavigate }: Edi
       <div className={`editor-body editor-body--${viewMode}`}>
         {(viewMode === "edit" || viewMode === "split") && (
           <div className="editor-cm-pane">
-            <CodeMirror
-              value={content}
-              height="100%"
-              theme={oneDark}
-              extensions={extensions}
-              onChange={onChange}
-              basicSetup={{
-                lineNumbers: true,
-                highlightActiveLineGutter: true,
-                highlightSpecialChars: true,
-                history: true,
-                foldGutter: false,
-                drawSelection: true,
-                dropCursor: true,
-                allowMultipleSelections: true,
-                indentOnInput: true,
-                syntaxHighlighting: true,
-                bracketMatching: true,
-                closeBrackets: true,
-                autocompletion: true,
-                rectangularSelection: false,
-                crosshairCursor: false,
-                highlightActiveLine: true,
-                highlightSelectionMatches: true,
-                closeBracketsKeymap: true,
-                defaultKeymap: true,
-                searchKeymap: true,
-                historyKeymap: true,
-                foldKeymap: false,
-                completionKeymap: true,
-                lintKeymap: true,
-              }}
-            />
+            <Suspense fallback={null}>
+              <MarkdownCodeEditor value={content} onChange={onChange} onNavigate={onNavigate} />
+            </Suspense>
           </div>
         )}
 
         {(viewMode === "preview" || viewMode === "split") && (
           <div className="preview-pane">
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              rehypePlugins={[rehypeHighlight]}
-            >
-              {content}
-            </ReactMarkdown>
+            <Suspense fallback={null}>
+              <MarkdownPreview content={content} />
+            </Suspense>
           </div>
         )}
       </div>

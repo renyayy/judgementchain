@@ -29,4 +29,23 @@ export default defineConfig(async () => ({
       ignored: ["**/src-tauri/**"],
     },
   },
+
+  build: {
+    chunkSizeWarningLimit: 800,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          react: ["react", "react-dom"],
+          codemirror: [
+            "@uiw/react-codemirror",
+            "@codemirror/commands",
+            "@codemirror/lang-markdown",
+            "@codemirror/theme-one-dark",
+            "@codemirror/view",
+          ],
+          markdown: ["react-markdown", "remark-gfm", "rehype-highlight"],
+        },
+      },
+    },
+  },
 }));
