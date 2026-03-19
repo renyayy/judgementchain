@@ -8,6 +8,7 @@ import { MarginPanel } from "./components/MarginPanel";
 import { GitPanel } from "./components/GitPanel";
 import { NotificationContainer } from "./components/NotificationContainer";
 import { AiChatPanel } from "./components/AiChatPanel";
+import GraphPanel from "./components/GraphPanel";
 import { useVault } from "./hooks/useVault";
 import { useAppMenu } from "./hooks/useAppMenu";
 import { useGit } from "./hooks/useGit";
@@ -33,6 +34,7 @@ function App() {
   const [marginOpen, setMarginOpen] = useState(true);
   const [gitOpen, setGitOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
+  const [graphOpen, setGraphOpen] = useState(false);
   const [vaultName, setVaultName] = useState("");
   const [vaultPath, setVaultPath] = useState("");
 
@@ -271,6 +273,7 @@ function App() {
           <button className={`header-btn ${splitOpen ? "active" : ""}`} onClick={() => setSplitOpen((v) => !v)} title="分割表示">◫</button>
           <button className={`header-btn ${gitOpen ? "active" : ""}`} onClick={() => setGitOpen((v) => !v)} title="Git">⎇</button>
           <button className={`header-btn ${aiOpen ? "active" : ""}`} onClick={() => setAiOpen((v) => !v)} title="AI Chat">✦</button>
+          <button className={`header-btn ${graphOpen ? "active" : ""}`} onClick={() => setGraphOpen((v) => !v)} title="Graph">◈</button>
           <button className="header-btn" onClick={() => setMarginOpen((v) => !v)} title="Judgement Brain">◧</button>
         </div>
       </header>
@@ -340,6 +343,12 @@ function App() {
             onLoadModel={loadModel}
             onGenerate={generateText}
             onClear={clearMessages}
+          />
+        )}
+        {graphOpen && (
+          <GraphPanel
+            vaultPath={vaultPath}
+            onOpenFile={handleSelectFile}
           />
         )}
         {marginOpen && (

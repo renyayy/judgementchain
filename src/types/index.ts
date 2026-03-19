@@ -31,7 +31,52 @@ export interface Config {
   git?: {
     enabled: boolean;
   };
+  ai?: {
+    vertex_ai_service_account_path?: string;
+    vertex_ai_project_id?: string;
+    vertex_ai_location?: string;
+    vertex_ai_model?: string;
+  };
 }
+
+// ==================== グラフ可視化 ====================
+
+export interface FileGraphNode {
+  id: string;
+  type: "file";
+  label: string;
+  path: string;
+  keywords: string[];
+  level: 1;
+  group_id: string | null;
+  child_ids: string[];
+}
+
+export interface GroupGraphNode {
+  id: string;
+  type: "group";
+  label: string;
+  path: null;
+  keywords: string[];
+  level: 2 | 3;
+  group_id: string | null;
+  child_ids: string[];
+}
+
+export type GraphNode = FileGraphNode | GroupGraphNode;
+
+export interface GraphEdge {
+  id: string;
+  source: string;
+  target: string;
+}
+
+export interface GraphData {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}
+
+export type AnalysisStatus = "idle" | "analyzing" | "done" | "error";
 
 export type EditorTabType = "file" | "diff" | "commit";
 
