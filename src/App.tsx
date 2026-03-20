@@ -9,6 +9,7 @@ import { GitPanel } from "./components/GitPanel";
 import { NotificationContainer } from "./components/NotificationContainer";
 import { AiChatPanel } from "./components/AiChatPanel";
 import GraphPanel from "./components/GraphPanel";
+import { LeftActivityBar, RightActivityBar } from "./components/ActivityBar";
 import { useVault } from "./hooks/useVault";
 import { useAppMenu } from "./hooks/useAppMenu";
 import { useGit } from "./hooks/useGit";
@@ -31,11 +32,12 @@ function App() {
   const [activePaneId, setActivePaneId] = useState<"left" | "right">("left");
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [marginOpen, setMarginOpen] = useState(true);
-  const [gitOpen, setGitOpen] = useState(false);
-  const [aiOpen, setAiOpen] = useState(false);
-  const [graphOpen, setGraphOpen] = useState(false);
+  const [rightPanel, setRightPanel] = useState<"git" | "ai" | "graph" | "margin" | null>("margin");
   const [vaultName, setVaultName] = useState("");
+
+  const toggleRightPanel = (panel: "git" | "ai" | "graph" | "margin") => {
+    setRightPanel((prev) => (prev === panel ? null : panel));
+  };
   const [vaultPath, setVaultPath] = useState("");
 
   const { modelStatus, messages, isGenerating, loadModel, generateText, clearMessages } = useAI();
@@ -265,20 +267,19 @@ function App() {
       <NotificationContainer />
       <header className="app-header">
         <div className="app-header-left">
-          <button className="header-btn" onClick={() => setSidebarOpen((v) => !v)} title="サイドバー">☰</button>
           <span className="app-title">Nomos</span>
         </div>
         <div className="app-header-right">
           {activeTab?.isDirty && <span className="save-indicator">未保存</span>}
           <button className={`header-btn ${splitOpen ? "active" : ""}`} onClick={() => setSplitOpen((v) => !v)} title="分割表示">◫</button>
-          <button className={`header-btn ${gitOpen ? "active" : ""}`} onClick={() => setGitOpen((v) => !v)} title="Git">⎇</button>
-          <button className={`header-btn ${aiOpen ? "active" : ""}`} onClick={() => setAiOpen((v) => !v)} title="AI Chat">✦</button>
-          <button className={`header-btn ${graphOpen ? "active" : ""}`} onClick={() => setGraphOpen((v) => !v)} title="Graph">◈</button>
-          <button className="header-btn" onClick={() => setMarginOpen((v) => !v)} title="Judgement Brain">◧</button>
         </div>
       </header>
 
       <div className="app-body">
+        <LeftActivityBar
+          sidebarOpen={sidebarOpen}
+          onToggleSidebar={() => setSidebarOpen((v) => !v)}
+        />
         {sidebarOpen && (
           <FileTree
             files={files}
@@ -322,7 +323,7 @@ function App() {
           )}
         </main>
 
-        {gitOpen && (
+        {rightPanel === "git" && (
           <GitPanel
             status={gitStatus}
             commits={gitCommits}
@@ -335,7 +336,7 @@ function App() {
             onOpenCommit={handleOpenCommit}
           />
         )}
-        {aiOpen && (
+        {rightPanel === "ai" && (
           <AiChatPanel
             modelStatus={modelStatus}
             messages={messages}
@@ -345,19 +346,23 @@ function App() {
             onClear={clearMessages}
           />
         )}
-        {graphOpen && (
+        {rightPanel === "graph" && (
           <GraphPanel
             vaultPath={vaultPath}
             onOpenFile={handleSelectFile}
           />
         )}
-        {marginOpen && (
+        {rightPanel === "margin" && (
           <MarginPanel
             annotations={activeTab?.annotations ?? []}
             backlinks={activeTab?.backlinks ?? []}
             onOpenNote={handleOpenNote}
           />
         )}
+        <RightActivityBar
+          rightPanel={rightPanel}
+          onToggleRightPanel={toggleRightPanel}
+        />
       </div>
     </div>
   );
