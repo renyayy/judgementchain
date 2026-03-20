@@ -9,19 +9,27 @@ use tokenizers::Tokenizer;
 #[cfg(not(dev))]
 use tauri::Manager;
 
-pub const GEMMA_MODEL_FILENAME: &str = "gemma-3-1b-it-q4_0.gguf";
+/// バンドル済み GGUF 解決のデフォルト候補。
+///
+/// - まず Gemma 3 1B (q4_0)
+/// - それが無い場合は Gemma 3 270m (q4 系) をフォールバック
+pub const GEMMA_MODEL_CANDIDATES: &[&str] = &[
+    "gemma-3-1b-it-q4_0.gguf",
+    "gemma-270m-gguf/gemma-3-270m-it-Q4_K_M.gguf",
+    "gemma-270m-gguf/gemma-3-270m-it-Q6_K.gguf",
+    "gemma-270m-gguf/gemma-3-270m-it-Q8_0.gguf",
+    "gemma-270m-gguf/gemma-3-270m-it-F16.gguf",
+];
 
-// ─── モデルパス ────────────────────────────────────────────────────────────────
+/// バンドル配下のサブディレクトリ（ファイル名だけ指定された場合の探索用）。
+const BUNDLED_MODEL_SUBDIRS: &[&str] = &["", "gemma-270m-gguf", "gemma-4bit"];
 
-/// バンドルされたモデルファイルのパスを返す。
-/// - dev ビルド: `src-tauri/models/<filename>` を直接参照
-/// - release ビルド: Tauri リソースディレクトリを参照
-pub fn get_bundled_model_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+fn get_bundled_models_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     #[cfg(dev)]
     {
         let _ = app;
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        return Ok(manifest_dir.join("models").join(GEMMA_MODEL_FILENAME));
+        Ok(manifest_dir.join("models"))
     }
     #[cfg(not(dev))]
     {
@@ -29,8 +37,26 @@ pub fn get_bundled_model_path(app: &tauri::AppHandle) -> Result<PathBuf, String>
             .path()
             .resource_dir()
             .map_err(|e| format!("リソースディレクトリの取得に失敗しました: {}", e))?;
-        Ok(resource_dir.join("models").join(GEMMA_MODEL_FILENAME))
+        Ok(resource_dir.join("models"))
     }
+}
+
+// ─── モデルパス ────────────────────────────────────────────────────────────────
+
+/// バンドル済み GGUF から「最初に存在する」候補のパスを返す。
+pub fn get_bundled_model_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let models_dir = get_bundled_models_dir(app)?;
+    for rel in GEMMA_MODEL_CANDIDATES {
+        let p = models_dir.join(rel);
+        if p.exists() {
+            return Ok(p);
+        }
+    }
+
+    Err(format!(
+        "バンドル済みモデルが見つかりません: {}",
+        models_dir.to_string_lossy()
+    ))
 }
 
 /// 設定されたモデルパス（任意）とバンドル済みモデルパスから、実際に存在するものを解決する。
@@ -52,6 +78,30 @@ pub fn resolve_model_path(
             if expanded.exists() {
                 return Ok(expanded);
             }
+
+            // `ai.model_path` にファイル名や相対パスだけを入れても解決できるようにする。
+            // （release では app resources 配下にしか存在しないため。）
+            if !expanded.is_absolute() {
+                let models_dir = get_bundled_models_dir(app)?;
+
+                // `gemma-3-270m-it-...gguf` のような「ファイル名だけ」指定を想定
+                if let Some(file_name) = expanded.file_name().and_then(|s| s.to_str()) {
+                    for subdir in BUNDLED_MODEL_SUBDIRS {
+                        let candidate = models_dir.join(subdir).join(file_name);
+                        tried.push(candidate.clone());
+                        if candidate.exists() {
+                            return Ok(candidate);
+                        }
+                    }
+                }
+
+                // `gemma-270m-gguf/gemma-3-270m-...gguf` のような「相対パス」指定も許可
+                let candidate = models_dir.join(&expanded);
+                tried.push(candidate.clone());
+                if candidate.exists() {
+                    return Ok(candidate);
+                }
+            }
         }
     }
 
@@ -68,9 +118,8 @@ pub fn resolve_model_path(
         .join("\n");
 
     Err(format!(
-        "モデルファイルが見つかりません。\n探したパス:\n{}\n\n対処:\n- dev の場合: `src-tauri/models/{}` に GGUF を置く\n- もしくは設定 `ai.model_path` に実ファイルパスを指定する",
+        "モデルファイルが見つかりません。\n探したパス:\n{}\n\n対処:\n- dev の場合: `src-tauri/models/` 配下に GGUF を置く\n- もしくは設定 `ai.model_path` に実ファイルパスを指定する（ファイル名だけでもバンドル内から解決します）",
         tried_lines,
-        GEMMA_MODEL_FILENAME
     ))
 }
 
@@ -170,7 +219,13 @@ impl CandleState {
         // Gemma 用のデフォルトトークナイザを HF Hub から取得
         let api = hf_hub::api::sync::Api::new()
             .map_err(|e| format!("HF API 初期化失敗: {}", e))?;
-        let repo = api.model("google/gemma-3-1b-it".to_string());
+        let model_path_str = model_path.to_string_lossy();
+        let repo_id = if model_path_str.contains("gemma-270m") {
+            "google/gemma-3-270m-it"
+        } else {
+            "google/gemma-3-1b-it"
+        };
+        let repo = api.model(repo_id.to_string());
         let tokenizer_file = repo.get("tokenizer.json")
             .map_err(|e| format!("トークナイザダウンロード失敗: {}", e))?;
         

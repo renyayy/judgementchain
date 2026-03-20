@@ -80,6 +80,8 @@ pub fn run() {
             commands::git_log,
             commands::git_show,
             commands::git_init,
+            commands::list_plugins,
+            commands::read_plugin_file,
             commands::embed_note,
             commands::get_similar_notes_for_margin,
             commands::get_model_path,

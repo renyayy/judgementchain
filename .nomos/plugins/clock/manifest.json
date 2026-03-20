@@ -1,0 +1,10 @@
+{
+  "id": "clock",
+  "name": "Clock",
+  "version": "0.1.0",
+  "description": "Show current time in the status bar",
+  "main": "main.js",
+  "capabilities": ["status-bar"],
+  "enabled": true
+}
+
