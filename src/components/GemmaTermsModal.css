@@ -1,0 +1,223 @@
+.gemma-terms-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  backdrop-filter: blur(4px);
+}
+
+.gemma-terms-modal {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  width: 100%;
+  max-width: 640px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+}
+
+/* Header */
+.gemma-terms-header {
+  padding: 28px 32px 20px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.gemma-terms-logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.gemma-terms-logo-icon {
+  width: 28px;
+  height: 28px;
+  background: linear-gradient(135deg, #4285f4 0%, #34a853 50%, #ea4335 100%);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  font-weight: 700;
+  color: #fff;
+  line-height: 1;
+  font-family: var(--font-ui);
+}
+
+.gemma-terms-logo-text {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: 0.3px;
+}
+
+.gemma-terms-title {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+  line-height: 1.3;
+}
+
+.gemma-terms-subtitle {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+/* Body */
+.gemma-terms-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 32px;
+  scroll-behavior: smooth;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.gemma-terms-body:focus {
+  outline: none;
+}
+
+.gemma-terms-body::-webkit-scrollbar {
+  width: 6px;
+}
+.gemma-terms-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+.gemma-terms-body::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+.gemma-terms-markdown h1 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 6px;
+}
+
+.gemma-terms-markdown h2 {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin: 20px 0 8px;
+}
+
+.gemma-terms-markdown h3 {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 14px 0 6px;
+}
+
+.gemma-terms-markdown p {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  margin-bottom: 6px;
+}
+
+.gemma-terms-markdown ul,
+.gemma-terms-markdown ol {
+  margin: 6px 0 6px 16px;
+}
+
+.gemma-terms-markdown li {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin-bottom: 3px;
+}
+
+.gemma-terms-markdown strong {
+  color: var(--text-primary);
+}
+
+.gemma-terms-markdown a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.gemma-terms-markdown a:hover {
+  text-decoration: underline;
+}
+
+.gemma-terms-markdown hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 16px 0;
+}
+
+.gemma-terms-markdown blockquote {
+  border-left: 3px solid var(--border);
+  padding-left: 12px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* Footer */
+.gemma-terms-footer {
+  padding: 16px 32px 20px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.gemma-terms-scroll-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
+  margin-bottom: 12px;
+}
+
+.gemma-terms-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.gemma-terms-btn {
+  padding: 7px 20px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: var(--font-ui);
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background 0.15s, opacity 0.15s;
+}
+
+.gemma-terms-btn-decline {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text-secondary);
+}
+
+.gemma-terms-btn-decline:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.gemma-terms-btn-accept {
+  background: var(--accent);
+  color: #fff;
+}
+
+.gemma-terms-btn-accept:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.gemma-terms-btn-accept:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}

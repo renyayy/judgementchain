@@ -11,6 +11,7 @@ import { AiChatPanel } from "./components/AiChatPanel";
 import GraphPanel from "./components/GraphPanel";
 import { TerminalPanel } from "./components/TerminalPanel";
 import { LeftActivityBar, RightActivityBar } from "./components/ActivityBar";
+import { GemmaTermsModal, isGemmaTermsAccepted } from "./components/GemmaTermsModal";
 import { useVault } from "./hooks/useVault";
 import { useAppMenu } from "./hooks/useAppMenu";
 import { useGit } from "./hooks/useGit";
@@ -42,6 +43,7 @@ function App() {
     setRightPanel((prev) => (prev === panel ? null : panel));
   };
   const [vaultPath, setVaultPath] = useState("");
+  const [showGemmaTerms, setShowGemmaTerms] = useState(false);
 
   const { modelStatus, messages, isGenerating, loadModel, generateText, clearMessages } = useAI();
   const { status: gitStatus, commits: gitCommits, refresh: refreshGit, stage: gitStage, unstage: gitUnstage, discard: gitDiscard, commit: gitCommit, initRepo: gitInit } = useGit();
@@ -72,10 +74,13 @@ function App() {
 
   useEffect(() => {
     listFiles();
-    invoke<{ vault: { path: string } }>("get_config").then((cfg) => {
+    invoke<{ vault: { path: string }; ai: { backend: string } }>("get_config").then((cfg) => {
       const p = cfg.vault.path.replace(/\/$/, "");
       setVaultPath(p);
       setVaultName(p.split("/").pop() ?? p);
+      if (cfg.ai.backend === "vertex" && !isGemmaTermsAccepted()) {
+        setShowGemmaTerms(true);
+      }
     });
     refreshGit();
   }, [listFiles]);
@@ -403,6 +408,12 @@ function App() {
   return (
     <div className="app">
       <NotificationContainer />
+      {showGemmaTerms && (
+        <GemmaTermsModal
+          onAccept={() => setShowGemmaTerms(false)}
+          onDecline={() => setShowGemmaTerms(false)}
+        />
+      )}
       <header className="app-header">
         <div className="app-header-left">
           <span className="app-title">Nomos</span>
