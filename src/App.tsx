@@ -448,6 +448,7 @@ function App() {
         <div className="app-header-right">
           {activeTab?.isDirty && <span className="save-indicator">未保存</span>}
           <button className={`header-btn ${splitOpen ? "active" : ""}`} onClick={() => setSplitOpen((v) => !v)} title="分割表示">◫</button>
+          <button className="header-btn" onClick={openSettingsTab} title="設定">⚙</button>
         </div>
       </header>
 
