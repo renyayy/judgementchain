@@ -16,12 +16,15 @@ interface EditorPaneProps {
   onSwitch: (id: string) => void;
   onClose: (id: string) => void;
   onSplit: (id: string) => void;
+  onCloseOthers: (id: string) => void;
+  onCloseToRight: (id: string) => void;
+  onCloseAll: () => void;
   onEditorChange: (value: string) => void;
   onNavigate: (path: string) => void;
 }
 
 export function EditorPane({
-  pane, isActive, onFocus, onSwitch, onClose, onSplit, onEditorChange, onNavigate,
+  pane, isActive, onFocus, onSwitch, onClose, onSplit, onCloseOthers, onCloseToRight, onCloseAll, onEditorChange, onNavigate,
 }: EditorPaneProps) {
   const activeTab = pane.tabs.find((t) => t.id === pane.activeId) ?? null;
 
@@ -36,6 +39,9 @@ export function EditorPane({
         onSwitch={onSwitch}
         onClose={onClose}
         onSplit={onSplit}
+        onCloseOthers={onCloseOthers}
+        onCloseToRight={onCloseToRight}
+        onCloseAll={onCloseAll}
       />
       <div className="editor-pane-content">
         {!activeTab ? (

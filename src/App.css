@@ -312,6 +312,37 @@ body {
 .tab-item.active .tab-close { opacity: 1; }
 .tab-close:hover { color: var(--text-primary); background: var(--bg-hover); }
 
+/* Tab Context Menu */
+.tab-context-menu {
+  position: fixed;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 0;
+  z-index: 9999;
+  min-width: 180px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+.tab-context-menu-item {
+  display: block;
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: var(--font-ui);
+  padding: 6px 14px;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tab-context-menu-item:hover { background: var(--bg-hover); }
+.tab-context-menu-separator {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+
 /* Body */
 .app-body {
   display: flex;

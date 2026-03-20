@@ -161,6 +161,41 @@ function App() {
     });
   }, [getPane, saveFile, setPane]);
 
+  const closeOthersInPane = useCallback(async (tabId: string, paneId: "left" | "right") => {
+    const pane = getPane(paneId);
+    for (const tab of pane.tabs) {
+      if (tab.id !== tabId && tab.isDirty && tab.tabType === "file") await saveFile(tab.path, tab.content);
+    }
+    setPane(paneId, (prev) => ({
+      tabs: prev.tabs.filter((t) => t.id === tabId),
+      activeId: tabId,
+    }));
+  }, [getPane, saveFile, setPane]);
+
+  const closeToRightInPane = useCallback(async (tabId: string, paneId: "left" | "right") => {
+    const pane = getPane(paneId);
+    const idx = pane.tabs.findIndex((t) => t.id === tabId);
+    if (idx < 0) return;
+    for (const tab of pane.tabs.slice(idx + 1)) {
+      if (tab.isDirty && tab.tabType === "file") await saveFile(tab.path, tab.content);
+    }
+    setPane(paneId, (prev) => {
+      const next = prev.tabs.slice(0, idx + 1);
+      const activeId = next.some((t) => t.id === prev.activeId) ? prev.activeId : (next[next.length - 1]?.id ?? null);
+      if (paneId === "right" && next.length === 0) setSplitOpen(false);
+      return { tabs: next, activeId };
+    });
+  }, [getPane, saveFile, setPane]);
+
+  const closeAllInPane = useCallback(async (paneId: "left" | "right") => {
+    const pane = getPane(paneId);
+    for (const tab of pane.tabs) {
+      if (tab.isDirty && tab.tabType === "file") await saveFile(tab.path, tab.content);
+    }
+    if (paneId === "right") setSplitOpen(false);
+    setPane(paneId, () => ({ tabs: [], activeId: null }));
+  }, [getPane, saveFile, setPane]);
+
   // ---- split (open in other pane) ---------------------------------------------
 
   const handleSplitTab = useCallback((tabId: string, fromPaneId: "left" | "right") => {
@@ -303,6 +338,9 @@ function App() {
             onSwitch={(id) => setLeftPane((p) => ({ ...p, activeId: id }))}
             onClose={(id) => closeTabInPane(id, "left")}
             onSplit={(id) => handleSplitTab(id, "left")}
+            onCloseOthers={(id) => closeOthersInPane(id, "left")}
+            onCloseToRight={(id) => closeToRightInPane(id, "left")}
+            onCloseAll={() => closeAllInPane("left")}
             onEditorChange={(v) => handleEditorChange(v, "left")}
             onNavigate={handleOpenNote}
           />
@@ -316,6 +354,9 @@ function App() {
                 onSwitch={(id) => setRightPane((p) => ({ ...p, activeId: id }))}
                 onClose={(id) => closeTabInPane(id, "right")}
                 onSplit={(id) => handleSplitTab(id, "right")}
+                onCloseOthers={(id) => closeOthersInPane(id, "right")}
+                onCloseToRight={(id) => closeToRightInPane(id, "right")}
+                onCloseAll={() => closeAllInPane("right")}
                 onEditorChange={(v) => handleEditorChange(v, "right")}
                 onNavigate={handleOpenNote}
               />

@@ -1,10 +1,12 @@
-import { useState, useMemo } from "react";
+import { useEffect, useState } from "react";
 import { FileViewer, isViewableFile } from "./FileViewer";
 import CodeMirror from "@uiw/react-codemirror";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
+import { LanguageDescription } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { EditorView } from "@codemirror/view";
+import { Extension } from "@codemirror/state";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -41,19 +43,53 @@ const editorTheme = EditorView.theme({
   },
 });
 
-const baseExtensions = [
-  markdown({ base: markdownLanguage, codeLanguages: languages }),
-  editorTheme,
-  EditorView.lineWrapping,
-  wikilinkPlugin,
-];
+const sharedExtensions = [editorTheme, EditorView.lineWrapping];
+
+function getFileName(path: string) {
+  return path.split("/").pop() ?? path;
+}
+
+function isMarkdownFile(path: string) {
+  return path.toLowerCase().endsWith(".md");
+}
 
 export function Editor({ content, filePath, isDirty, onChange, onNavigate }: EditorProps) {
-  const extensions = useMemo(() => [
-    ...baseExtensions,
-    ...(onNavigate ? [wikilinkClickHandler(onNavigate)] : []),
-  ], [onNavigate]);
+  const [extensions, setExtensions] = useState<Extension[]>(sharedExtensions);
   const [viewMode, setViewMode] = useState<ViewMode>("edit");
+
+  useEffect(() => {
+    if (!filePath) {
+      setExtensions(sharedExtensions);
+      return;
+    }
+
+    let cancelled = false;
+
+    const buildExtensions = async () => {
+      if (isMarkdownFile(filePath)) {
+        const markdownExtensions: Extension[] = [
+          ...sharedExtensions,
+          markdown({ base: markdownLanguage, codeLanguages: languages }),
+          wikilinkPlugin,
+          ...(onNavigate ? [wikilinkClickHandler(onNavigate)] : []),
+        ];
+        if (!cancelled) setExtensions(markdownExtensions);
+        return;
+      }
+
+      const fileName = getFileName(filePath);
+      const description = LanguageDescription.matchFilename(languages, fileName);
+      const loaded = description ? await description.load() : null;
+      const languageExtensions: Extension[] = loaded ? [...sharedExtensions, loaded] : [...sharedExtensions];
+      if (!cancelled) setExtensions(languageExtensions);
+    };
+
+    void buildExtensions();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [filePath, onNavigate]);
 
   if (!filePath) {
     return (
@@ -71,7 +107,7 @@ export function Editor({ content, filePath, isDirty, onChange, onNavigate }: Edi
     return (
       <div className="editor-container">
         <div className="editor-header">
-          <span className="editor-filename">{filePath.split("/").pop()}</span>
+          <span className="editor-filename">{getFileName(filePath)}</span>
         </div>
         <div className="editor-body editor-body--preview">
           <FileViewer filePath={filePath} />
@@ -84,7 +120,7 @@ export function Editor({ content, filePath, isDirty, onChange, onNavigate }: Edi
     <div className="editor-container">
       <div className="editor-header">
         <span className="editor-filename">
-          {filePath.split("/").pop()}
+          {getFileName(filePath)}
           {isDirty && <span className="editor-dirty-indicator">●</span>}
         </span>
         <div className="view-mode-toggle">
