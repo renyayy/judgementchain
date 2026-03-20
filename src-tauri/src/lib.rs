@@ -6,6 +6,7 @@ mod git;
 mod watcher;
 mod ai;
 mod bibtex;
+mod vertex_ai;
 
 use std::sync::{Arc, Mutex, RwLock};
 use config::Config;
@@ -80,6 +81,7 @@ pub fn run() {
             commands::detect_contradictions,
             commands::get_weekly_summary,
             commands::generate_weekly_summary,
+            commands::analyze_vault_for_graph,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

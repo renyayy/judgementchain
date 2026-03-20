@@ -34,6 +34,9 @@ hex = "0.4"
 dirs = "5"
 regex = "1"
 encoding_rs = "0.8"
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+jsonwebtoken = "9"
+base64 = "0.22"
 candle-core = { git = "https://github.com/liverHawk/candle.git", branch = "main" }
 candle-nn = { git = "https://github.com/liverHawk/candle.git", branch = "main" }
 candle-transformers = { git = "https://github.com/liverHawk/candle.git", branch = "main" }
