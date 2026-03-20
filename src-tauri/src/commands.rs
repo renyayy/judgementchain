@@ -1014,10 +1014,10 @@ pub async fn analyze_vault_for_graph(
         }
 
         let response = backend.query(&prompt).await?;
-        let cleaned = crate::vertex_ai::clean_json_response(&response);
+        let cleaned = crate::vertex_ai::clean_json_response_owned(&response);
 
-        let entries: Vec<KeywordEntry> = serde_json::from_str(cleaned)
-            .map_err(|e| format!("キーワード抽出レスポンスパースエラー: {} / レスポンス: {}", e, cleaned))?;
+        let entries: Vec<KeywordEntry> = serde_json::from_str(&cleaned)
+            .map_err(|e| format!("キーワード抽出レスポンスパースエラー: {} / レスポンス: {}", e, &cleaned))?;
 
         for entry in entries {
             keyword_map.insert(entry.path, entry.keywords);
@@ -1049,10 +1049,10 @@ pub async fn analyze_vault_for_graph(
     );
 
     let group_response = backend.query(&group_prompt).await?;
-    let group_cleaned = crate::vertex_ai::clean_json_response(&group_response);
+    let group_cleaned = crate::vertex_ai::clean_json_response_owned(&group_response);
 
-    let groups: Vec<GroupEntry> = serde_json::from_str(group_cleaned)
-        .map_err(|e| format!("グループ化レスポンスパースエラー: {} / レスポンス: {}", e, group_cleaned))?;
+    let groups: Vec<GroupEntry> = serde_json::from_str(&group_cleaned)
+        .map_err(|e| format!("グループ化レスポンスパースエラー: {} / レスポンス: {}", e, &group_cleaned))?;
 
     // Phase 3: 2トップグループへの集約＋ラベリング（1コール）
     let mut groups_str = String::from("[");
@@ -1081,9 +1081,9 @@ pub async fn analyze_vault_for_graph(
     );
 
     let hierarchy_response = backend.query(&hierarchy_prompt).await?;
-    let hierarchy_cleaned = crate::vertex_ai::clean_json_response(&hierarchy_response);
+    let hierarchy_cleaned = crate::vertex_ai::clean_json_response_owned(&hierarchy_response);
 
-    let hierarchy: HierarchyResult = serde_json::from_str(hierarchy_cleaned)
+    let hierarchy: HierarchyResult = serde_json::from_str(&hierarchy_cleaned)
         .map_err(|e| format!("階層化レスポンスパースエラー: {} / レスポンス: {}", e, hierarchy_cleaned))?;
 
     // グラフデータを構築

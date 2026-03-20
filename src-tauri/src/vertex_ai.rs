@@ -215,20 +215,62 @@ pub async fn call_gemini(
     Ok(acc)
 }
 
+/// LLM応答からJSONを抽出し、trailing commaを除去して返す
+pub fn clean_json_response_owned(text: &str) -> String {
+    let cleaned = clean_json_response(text);
+    // trailing comma を除去: },] → }] や ,] → ] や ,} → }
+    let mut result = String::with_capacity(cleaned.len());
+    let chars: Vec<char> = cleaned.chars().collect();
+    let len = chars.len();
+    let mut i = 0;
+    while i < len {
+        if chars[i] == ',' {
+            // カンマの後の空白・改行を飛ばして次の文字を確認
+            let mut j = i + 1;
+            while j < len && (chars[j] == ' ' || chars[j] == '\n' || chars[j] == '\r' || chars[j] == '\t') {
+                j += 1;
+            }
+            if j < len && (chars[j] == ']' || chars[j] == '}') {
+                // trailing comma → スキップ
+                i += 1;
+                continue;
+            }
+        }
+        result.push(chars[i]);
+        i += 1;
+    }
+    result
+}
+
 /// JSON文字列からコードブロックを除去してパース用に正規化する
+/// ```json ... ``` 形式のコードブロックからJSONを抽出する。
+/// コードブロックがなければ、最初の [ または { から最後の ] または } までを切り出す。
 pub fn clean_json_response(text: &str) -> &str {
     let text = text.trim();
-    // ```json ... ``` または ``` ... ``` を除去
-    if let Some(stripped) = text.strip_prefix("```json") {
-        if let Some(inner) = stripped.strip_suffix("```") {
-            return inner.trim();
+
+    // ```json ... ``` または ``` ... ``` を探す
+    if let Some(start) = text.find("```json") {
+        let after_fence = &text[start + 7..];
+        if let Some(end) = after_fence.find("```") {
+            return after_fence[..end].trim();
         }
     }
-    if let Some(stripped) = text.strip_prefix("```") {
-        if let Some(inner) = stripped.strip_suffix("```") {
-            return inner.trim();
+    if let Some(start) = text.find("```") {
+        let after_fence = &text[start + 3..];
+        if let Some(end) = after_fence.find("```") {
+            return after_fence[..end].trim();
         }
     }
+
+    // コードブロックがなければ、最初のJSON開始文字から最後のJSON終了文字まで
+    let json_start = text.find('[').or_else(|| text.find('{'));
+    let json_end = text.rfind(']').or_else(|| text.rfind('}'));
+    if let (Some(s), Some(e)) = (json_start, json_end) {
+        if s <= e {
+            return &text[s..=e];
+        }
+    }
+
     text
 }
 
