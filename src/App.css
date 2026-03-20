@@ -2085,10 +2085,10 @@ body.resizing * {
 
 /* ==================== Light Theme ==================== */
 [data-theme="light"] {
-  --bg-primary: #ffffff;
-  --bg-secondary: #f5f5f5;
-  --bg-tertiary: #ebebeb;
-  --bg-hover: #e0e0e0;
+  --bg-primary: #f0f0f0;
+  --bg-secondary: #e8e8e8;
+  --bg-tertiary: #dcdcdc;
+  --bg-hover: #d0d0d0;
   --bg-selected: #c8ddf5;
   --border: #d0d0d0;
   --text-primary: #1e1e1e;

@@ -4,10 +4,10 @@ import CodeMirror from "@uiw/react-codemirror";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { LanguageDescription } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
-import { oneDark } from "@codemirror/theme-one-dark";
 import { EditorView } from "@codemirror/view";
 import { Extension } from "@codemirror/state";
 import "highlight.js/styles/github-dark.css";
+import { nomosDark, nomosLight } from "../lib/editorThemes";
 import { wikilinkPlugin, wikilinkClickHandler } from "../extensions/wikilinks";
 import { wordCompletionExtension } from "../extensions/wordCompletion";
 import { MarkdownPreview } from "./MarkdownPreview";
@@ -38,10 +38,12 @@ function isAdocFile(path: string) {
 
 export function Editor({ content, filePath, isDirty, fontSize = 14, theme = "dark", onChange, onNavigate }: EditorProps) {
   const editorTheme = useMemo(() => EditorView.theme({
-    "&": { height: "100%", fontSize: `${fontSize}px` },
+    "&": { height: "100%", fontSize: `${fontSize}px`, backgroundColor: "var(--bg-primary)" },
     ".cm-scroller": { overflow: "auto", fontFamily: "'JetBrains Mono', 'Fira Code', monospace", lineHeight: "1.7" },
     ".cm-content": { padding: "16px 20px", maxWidth: "760px", margin: "0 auto" },
     ".cm-line": { padding: "0" },
+    ".cm-gutters": { backgroundColor: "var(--bg-secondary)", borderRight: "1px solid var(--border)" },
+    ".cm-activeLineGutter": { backgroundColor: "var(--bg-tertiary)" },
   }), [fontSize]);
 
   const sharedExtensions = useMemo(() => [editorTheme, EditorView.lineWrapping], [editorTheme]);
@@ -164,7 +166,7 @@ export function Editor({ content, filePath, isDirty, fontSize = 14, theme = "dar
             <CodeMirror
               value={content}
               height="100%"
-              theme={theme === "light" ? undefined : oneDark}
+              theme={theme === "light" ? nomosLight : nomosDark}
               extensions={extensions}
               onChange={onChange}
               basicSetup={{
