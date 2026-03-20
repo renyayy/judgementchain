@@ -38,3 +38,4 @@ mise.prod.toml
 
 # Project docs (managed locally)
 .issues/
+.docs/
