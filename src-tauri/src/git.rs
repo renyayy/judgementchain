@@ -93,12 +93,20 @@ pub fn get_repo_status(vault_path: &str) -> GitStatus {
     GitStatus { is_repo: true, branch, files }
 }
 
+fn to_relative(git_root: &std::path::Path, file_path: &str) -> String {
+    let p = std::path::Path::new(file_path);
+    p.strip_prefix(git_root)
+        .map(|r| r.to_string_lossy().to_string())
+        .unwrap_or_else(|_| file_path.to_string())
+}
+
 pub fn stage_file(vault_path: &str, file_path: &str) -> Result<(), String> {
     let path = crate::config::expand_tilde(vault_path);
     let git_root = find_git_root(&path).ok_or("Not a git repository")?;
+    let rel = to_relative(&git_root, file_path);
 
     let output = std::process::Command::new("git")
-        .args(["add", file_path])
+        .args(["add", &rel])
         .current_dir(&git_root)
         .output()
         .map_err(|e| e.to_string())?;
@@ -112,9 +120,10 @@ pub fn stage_file(vault_path: &str, file_path: &str) -> Result<(), String> {
 pub fn unstage_file(vault_path: &str, file_path: &str) -> Result<(), String> {
     let path = crate::config::expand_tilde(vault_path);
     let git_root = find_git_root(&path).ok_or("Not a git repository")?;
+    let rel = to_relative(&git_root, file_path);
 
     let output = std::process::Command::new("git")
-        .args(["restore", "--staged", file_path])
+        .args(["restore", "--staged", &rel])
         .current_dir(&git_root)
         .output()
         .map_err(|e| e.to_string())?;
@@ -183,6 +192,23 @@ pub fn get_log(vault_path: &str, limit: usize) -> Vec<GitCommit> {
             }
         })
         .collect()
+}
+
+pub fn discard_file(vault_path: &str, file_path: &str) -> Result<(), String> {
+    let path = crate::config::expand_tilde(vault_path);
+    let git_root = find_git_root(&path).ok_or("Not a git repository")?;
+    let rel = to_relative(&git_root, file_path);
+
+    let output = std::process::Command::new("git")
+        .args(["restore", &rel])
+        .current_dir(&git_root)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).to_string());
+    }
+    Ok(())
 }
 
 pub fn init_repo(vault_path: &str) -> Result<(), String> {

@@ -636,6 +636,16 @@ pub async fn git_unstage(file_path: String, state: State<'_, AppState>) -> Resul
 }
 
 #[tauri::command]
+pub async fn git_discard(file_path: String, state: State<'_, AppState>) -> Result<bool, String> {
+    let vault_path = {
+        let config = state.config.read().map_err(|e| format!("Config lock error: {}", e))?;
+        config.get_vault_path().to_string_lossy().to_string()
+    };
+    crate::git::discard_file(&vault_path, &file_path)?;
+    Ok(true)
+}
+
+#[tauri::command]
 pub async fn git_commit(message: String, state: State<'_, AppState>) -> Result<bool, String> {
     let vault_path = {
         let config = state.config.read().map_err(|e| format!("Config lock error: {}", e))?;
@@ -806,6 +816,16 @@ pub async fn load_model(
     };
 
     let model_path = crate::ai::resolve_model_path(&app, Some(&configured_model_path))?;
+
+    let mem_frac = {
+        let config = state
+            .config
+            .read()
+            .map_err(|e| format!("Config lock error: {}", e))?;
+        config.performance.max_system_memory_fraction
+    };
+    crate::memory_budget::check_model_load_allowed(mem_frac, &model_path)?;
+
     let candle_arc = std::sync::Arc::clone(&state.candle);
 
     // モデルロードは重いので blocking スレッドで実行
@@ -848,4 +868,301 @@ pub async fn generate_text(
     .map_err(|e| format!("タスクエラー: {}", e))??;
 
     Ok(result)
+}
+
+// ==================== グラフ分析コマンド ====================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphNodeData {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub node_type: String,  // "file" | "group"
+    pub label: String,
+    pub path: Option<String>,
+    pub keywords: Vec<String>,
+    pub level: u32,
+    pub group_id: Option<String>,
+    pub child_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphEdgeData {
+    pub id: String,
+    pub source: String,
+    pub target: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphData {
+    pub nodes: Vec<GraphNodeData>,
+    pub edges: Vec<GraphEdgeData>,
+}
+
+// Geminiレスポンス用中間型
+#[derive(Debug, Deserialize)]
+struct KeywordEntry {
+    path: String,
+    keywords: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GroupEntry {
+    #[serde(rename = "groupId")]
+    group_id: String,
+    #[serde(rename = "fileIds")]
+    file_ids: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct HierarchyChild {
+    id: String,
+    label: String,
+    files: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct HierarchyTop {
+    id: String,
+    label: String,
+    children: Vec<HierarchyChild>,
+}
+
+#[derive(Debug, Deserialize)]
+struct HierarchyResult {
+    hierarchy: Vec<HierarchyTop>,
+}
+
+/// vault内の .md ファイルを解析してネットワークグラフデータを返す
+#[tauri::command]
+pub async fn analyze_vault_for_graph(
+    dir_path: String,
+    state: State<'_, AppState>,
+) -> Result<GraphData, String> {
+    // 設定から Vertex AI 情報を取得
+    let (sa_json, project_id, location, model) = {
+        let config = state.config.read().map_err(|e| format!("Config lock error: {}", e))?;
+        (
+            config.ai.vertex_ai_service_account_json.clone(),
+            config.ai.vertex_ai_project_id.clone(),
+            config.ai.vertex_ai_location.clone(),
+            config.ai.vertex_ai_model.clone(),
+        )
+    };
+
+    if sa_json.is_empty() || project_id.is_empty() {
+        return Err("Vertex AI設定が不完全です。Graphパネルの⚙設定からサービスアカウントJSONとプロジェクトIDを設定してください。".to_string());
+    }
+
+    // アクセストークン取得
+    let access_token = crate::vertex_ai::get_access_token(&sa_json).await?;
+
+    // .md ファイル一覧を収集（最大30件）
+    let expanded_dir = crate::config::expand_tilde(&dir_path);
+    let mut md_files: Vec<(String, String)> = Vec::new(); // (path, content_preview)
+
+    for entry in walkdir::WalkDir::new(&expanded_dir)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
+        if entry.file_type().is_file() {
+            if let Some(ext) = entry.path().extension() {
+                if ext == "md" {
+                    let path_str = entry.path().to_string_lossy().to_string();
+                    let preview = std::fs::read_to_string(entry.path())
+                        .unwrap_or_default()
+                        .chars()
+                        .take(500)
+                        .collect::<String>();
+                    md_files.push((path_str, preview));
+                    if md_files.len() >= 30 {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    if md_files.is_empty() {
+        return Err("解析対象の.mdファイルが見つかりませんでした。".to_string());
+    }
+
+    // Phase 1: キーワード抽出（5件バッチ）
+    let mut keyword_map: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+
+    for chunk in md_files.chunks(5) {
+        let mut prompt = "以下の複数のMarkdownファイルそれぞれから、内容を最もよく表す3〜5個のキーワードを日本語で抽出してください。JSON配列のみを返してください（説明不要）:\n[{\"path\":\"...\",\"keywords\":[\"kw1\",\"kw2\"]}]\n\n".to_string();
+
+        for (path, content) in chunk {
+            let filename = std::path::Path::new(path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(path);
+            prompt.push_str(&format!("--- ファイル: {} ---\n{}\n\n", filename, content));
+            prompt.push_str(&format!("(フルパス: {})\n\n", path));
+        }
+
+        let response = crate::vertex_ai::call_gemini(&access_token, &project_id, &location, &model, &prompt).await?;
+        let cleaned = crate::vertex_ai::clean_json_response(&response);
+
+        let entries: Vec<KeywordEntry> = serde_json::from_str(cleaned)
+            .map_err(|e| format!("キーワード抽出レスポンスパースエラー: {} / レスポンス: {}", e, cleaned))?;
+
+        for entry in entries {
+            keyword_map.insert(entry.path, entry.keywords);
+        }
+    }
+
+    // Phase 2: グループ化（1コール）
+    let mut kw_list_str = String::from("[");
+    for (path, keywords) in &keyword_map {
+        let filename = std::path::Path::new(path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(path);
+        kw_list_str.push_str(&format!(
+            "{{\"path\":\"{}\",\"filename\":\"{}\",\"keywords\":{}}},",
+            path,
+            filename,
+            serde_json::to_string(keywords).unwrap_or_default()
+        ));
+    }
+    if kw_list_str.ends_with(',') {
+        kw_list_str.pop();
+    }
+    kw_list_str.push(']');
+
+    let group_prompt = format!(
+        "以下はMarkdownファイルとそのキーワードの一覧です。キーワードの類似性に基づいて、意味的に近いファイルをグループ化してください。グループ数は4〜8程度にしてください。JSON配列のみを返してください（説明不要）:\n[{{\"groupId\":\"g1\",\"fileIds\":[\"path1\",\"path2\"]}}]\n\nファイル一覧:\n{}",
+        kw_list_str
+    );
+
+    let group_response = crate::vertex_ai::call_gemini(&access_token, &project_id, &location, &model, &group_prompt).await?;
+    let group_cleaned = crate::vertex_ai::clean_json_response(&group_response);
+
+    let groups: Vec<GroupEntry> = serde_json::from_str(group_cleaned)
+        .map_err(|e| format!("グループ化レスポンスパースエラー: {} / レスポンス: {}", e, group_cleaned))?;
+
+    // Phase 3: 2トップグループへの集約＋ラベリング（1コール）
+    let mut groups_str = String::from("[");
+    for g in &groups {
+        let file_names: Vec<String> = g.file_ids.iter()
+            .map(|p| std::path::Path::new(p)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(p)
+                .to_string())
+            .collect();
+        groups_str.push_str(&format!(
+            "{{\"id\":\"{}\",\"files\":{}}},",
+            g.group_id,
+            serde_json::to_string(&file_names).unwrap_or_default()
+        ));
+    }
+    if groups_str.ends_with(',') {
+        groups_str.pop();
+    }
+    groups_str.push(']');
+
+    let hierarchy_prompt = format!(
+        "以下のグループ一覧を、意味的に最も近いもの同士でまとめ、最終的に2つの大きなグループになるよう階層構造を作ってください。各グループ・サブグループに短い日本語のジャンル名（5〜15文字）を付けてください。JSONオブジェクトのみを返してください（説明不要）:\n{{\"hierarchy\":[{{\"id\":\"top1\",\"label\":\"ジャンル名\",\"children\":[{{\"id\":\"g1\",\"label\":\"サブジャンル名\",\"files\":[\"filename.md\"]}}]}}]}}\n\nグループ一覧:\n{}",
+        groups_str
+    );
+
+    let hierarchy_response = crate::vertex_ai::call_gemini(&access_token, &project_id, &location, &model, &hierarchy_prompt).await?;
+    let hierarchy_cleaned = crate::vertex_ai::clean_json_response(&hierarchy_response);
+
+    let hierarchy: HierarchyResult = serde_json::from_str(hierarchy_cleaned)
+        .map_err(|e| format!("階層化レスポンスパースエラー: {} / レスポンス: {}", e, hierarchy_cleaned))?;
+
+    // グラフデータを構築
+    let mut nodes: Vec<GraphNodeData> = Vec::new();
+    let mut edges: Vec<GraphEdgeData> = Vec::new();
+    let mut edge_counter = 0usize;
+
+    // ファイルパスのlookup（filenameからfullpathへ）
+    let path_lookup: std::collections::HashMap<String, String> = md_files.iter()
+        .map(|(p, _)| {
+            let name = std::path::Path::new(p)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(p)
+                .to_string();
+            (name, p.clone())
+        })
+        .collect();
+
+    for (top_idx, top) in hierarchy.hierarchy.iter().enumerate() {
+        let top_id = format!("top_{}", top_idx);
+
+        // トップグループノード（level=3）
+        nodes.push(GraphNodeData {
+            id: top_id.clone(),
+            node_type: "group".to_string(),
+            label: top.label.clone(),
+            path: None,
+            keywords: vec![],
+            level: 3,
+            group_id: None,
+            child_ids: top.children.iter().map(|c| format!("mid_{}_{}", top_idx, c.id)).collect(),
+        });
+
+        for (child_idx, child) in top.children.iter().enumerate() {
+            let mid_id = format!("mid_{}_{}", top_idx, child.id);
+
+            // 中間グループノード（level=2）
+            nodes.push(GraphNodeData {
+                id: mid_id.clone(),
+                node_type: "group".to_string(),
+                label: child.label.clone(),
+                path: None,
+                keywords: vec![],
+                level: 2,
+                group_id: Some(top_id.clone()),
+                child_ids: child.files.iter().map(|f| {
+                    path_lookup.get(f).cloned().unwrap_or_else(|| f.clone())
+                }).collect(),
+            });
+
+            // 中間グループ → トップグループ エッジ
+            edges.push(GraphEdgeData {
+                id: format!("e{}", edge_counter),
+                source: mid_id.clone(),
+                target: top_id.clone(),
+            });
+            edge_counter += 1;
+
+            // ファイルノード（level=1）
+            for filename in &child.files {
+                let full_path = path_lookup.get(filename).cloned().unwrap_or_else(|| filename.clone());
+                let label = std::path::Path::new(&full_path)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or(&full_path)
+                    .to_string();
+                let file_keywords = keyword_map.get(&full_path).cloned().unwrap_or_default();
+
+                nodes.push(GraphNodeData {
+                    id: full_path.clone(),
+                    node_type: "file".to_string(),
+                    label,
+                    path: Some(full_path.clone()),
+                    keywords: file_keywords,
+                    level: 1,
+                    group_id: Some(mid_id.clone()),
+                    child_ids: vec![],
+                });
+
+                // ファイル → 中間グループ エッジ
+                edges.push(GraphEdgeData {
+                    id: format!("e{}", edge_counter),
+                    source: full_path.clone(),
+                    target: mid_id.clone(),
+                });
+                edge_counter += 1;
+            }
+        }
+    }
+
+    Ok(GraphData { nodes, edges })
 }

@@ -591,8 +591,9 @@ contradiction_check_idle_ms = 2000
 update_debounce_ms = 500
 
 [performance]
-max_memory_mb = 2048
-embedding_batch_size = 10
+# 搭載物理メモリに対するプロセス仮想メモリ上限の割合（Unix: RLIMIT_AS）。0 以下で無効。
+max_system_memory_fraction = 0.8
+embedding_batch_size = 10  # 未実装（将来用）
 ```
 
 **インターフェース**:
@@ -1034,7 +1035,7 @@ CREATE INDEX idx_embeddings_updated ON note_embeddings(updated_at);
 
 ### メモリ管理
 
-- 最大メモリ使用量: 2GB
+- プロセス仮想メモリ上限: 既定で搭載物理メモリの 80%（`[performance] max_system_memory_fraction`、0 で無効）
 - Gemmaモデル: 600MB（q4_0量子化）
 - Embedding キャッシュ: 最大1000ノート × 384次元 × 4bytes = 1.5MB
 - 行動ログ: 最大100,000エントリ × 100bytes = 10MB

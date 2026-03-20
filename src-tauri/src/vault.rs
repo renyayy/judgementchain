@@ -37,6 +37,86 @@ pub fn list_files(vault_path: &str, relative_path: Option<&str>) -> Result<Vec<F
     build_tree(&search_path)
 }
 
+/// ツリーに載せない「明らかにバイナリ」拡張子（テキスト・画像・PDF 等は載せる）。
+fn is_vault_skipped_binary_ext(raw_ext: &str) -> bool {
+    matches!(
+        raw_ext.to_ascii_lowercase().as_str(),
+        "7z"
+            | "a"
+            | "aac"
+            | "apk"
+            | "appimage"
+            | "avi"
+            | "bin"
+            | "bz2"
+            | "cab"
+            | "class"
+            | "deb"
+            | "dll"
+            | "dmg"
+            | "dylib"
+            | "ear"
+            | "exe"
+            | "flac"
+            | "gguf"
+            | "gz"
+            | "h5"
+            | "img"
+            | "iso"
+            | "jar"
+            | "lz4"
+            | "m4a"
+            | "mkv"
+            | "mov"
+            | "mp3"
+            | "mp4"
+            | "msi"
+            | "msix"
+            | "o"
+            | "obj"
+            | "ogg"
+            | "onnx"
+            | "otf"
+            | "pdb"
+            | "pkl"
+            | "pkg"
+            | "pt"
+            | "pth"
+            | "pyc"
+            | "pyo"
+            | "rar"
+            | "rpm"
+            | "safetensors"
+            | "so"
+            | "sqlite"
+            | "sqlite3"
+            | "swf"
+            | "sys"
+            | "tar"
+            | "tbz2"
+            | "tgz"
+            | "ttf"
+            | "vmdk"
+            | "wasm"
+            | "webm"
+            | "wma"
+            | "wmv"
+            | "woff"
+            | "woff2"
+            | "xz"
+            | "zst"
+            | "doc"
+            | "xls"
+            | "ppt"
+            | "docx"
+            | "xlsx"
+            | "pptx"
+            | "odt"
+            | "ods"
+            | "odp"
+    )
+}
+
 fn build_tree(dir: &std::path::Path) -> Result<Vec<FileEntry>, String> {
     let mut entries: Vec<FileEntry> = std::fs::read_dir(dir)
         .map_err(|e| format!("Failed to read directory: {}", e))?
@@ -54,11 +134,10 @@ fn build_tree(dir: &std::path::Path) -> Result<Vec<FileEntry>, String> {
                 return None;
             }
 
-            // 対応する拡張子以外はスキップ
-            const ALLOWED_EXTS: &[&str] = &["md", "png", "jpg", "jpeg", "gif", "webp", "svg", "pdf"];
+            // 明らかなバイナリ（実行ファイル・圧縮・学習済みモデル等）だけツリーから除外。それ以外は表示する。
             if !is_dir {
                 let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-                if !ALLOWED_EXTS.contains(&ext) {
+                if is_vault_skipped_binary_ext(ext) {
                     return None;
                 }
             }

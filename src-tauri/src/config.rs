@@ -1,12 +1,41 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+fn default_vertex_location() -> String {
+    "us-central1".to_string()
+}
+
+fn default_vertex_model() -> String {
+    "gemini-2.0-flash-001".to_string()
+}
+
+fn default_max_system_memory_fraction() -> f64 {
+    0.8
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PerformanceConfig {
+    /// プロセスの仮想メモリ上限を、搭載物理メモリのこの割合に抑える（1.0 = 100%）。0 以下で無効。
+    #[serde(default = "default_max_system_memory_fraction")]
+    pub max_system_memory_fraction: f64,
+}
+
+impl Default for PerformanceConfig {
+    fn default() -> Self {
+        Self {
+            max_system_memory_fraction: default_max_system_memory_fraction(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub vault: VaultConfig,
     pub ai: AiConfig,
     pub git: GitConfig,
     pub judgement_brain: JudgementBrainConfig,
+    #[serde(default)]
+    pub performance: PerformanceConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21,6 +50,14 @@ pub struct AiConfig {
     pub model_path: String,
     pub embedding_model: String,
     pub context_size: usize,
+    #[serde(default)]
+    pub vertex_ai_service_account_json: String,
+    #[serde(default)]
+    pub vertex_ai_project_id: String,
+    #[serde(default = "default_vertex_location")]
+    pub vertex_ai_location: String,
+    #[serde(default = "default_vertex_model")]
+    pub vertex_ai_model: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,6 +87,10 @@ impl Default for Config {
                 model_path: "".to_string(),
                 embedding_model: "nomic-embed-text".to_string(),
                 context_size: 4096,
+                vertex_ai_service_account_json: "".to_string(),
+                vertex_ai_project_id: "".to_string(),
+                vertex_ai_location: default_vertex_location(),
+                vertex_ai_model: default_vertex_model(),
             },
             git: GitConfig {
                 enabled: false,
@@ -62,6 +103,7 @@ impl Default for Config {
                 contradiction_check_idle_ms: 3000,
                 update_debounce_ms: 500,
             },
+            performance: PerformanceConfig::default(),
         }
     }
 }

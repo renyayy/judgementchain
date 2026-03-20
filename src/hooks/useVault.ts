@@ -70,6 +70,17 @@ export function useVault() {
     }
   }, [listFiles]);
 
+  const renameFile = useCallback(async (oldPath: string, newPath: string): Promise<boolean> => {
+    try {
+      const ok = await invoke<boolean>("rename_file", { oldPath, newPath });
+      if (ok) await listFiles();
+      return ok;
+    } catch (e) {
+      notify(`リネームに失敗しました: ${e}`, "error");
+      return false;
+    }
+  }, [listFiles]);
+
   const getMarginAnnotations = useCallback(async (path: string): Promise<MarginAnnotation[]> => {
     try {
       return await invoke<MarginAnnotation[]>("get_similar_notes_for_margin", { path });
@@ -98,6 +109,7 @@ export function useVault() {
     createFile,
     createDir,
     deleteFile,
+    renameFile,
     getMarginAnnotations,
     getBacklinks,
   };

@@ -32,6 +32,11 @@ export function useGit() {
     await refreshStatus();
   }, [refreshStatus]);
 
+  const discard = useCallback(async (path: string) => {
+    await invoke("git_discard", { filePath: path });
+    await refreshStatus();
+  }, [refreshStatus]);
+
   const commit = useCallback(async (message: string) => {
     await invoke("git_commit", { message });
     await refresh();
@@ -42,5 +47,5 @@ export function useGit() {
     await refresh();
   }, [refresh]);
 
-  return { status, commits, refresh, refreshStatus, stage, unstage, commit, initRepo };
+  return { status, commits, refresh, refreshStatus, stage, unstage, discard, commit, initRepo };
 }

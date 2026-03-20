@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, type MouseEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { confirm } from "@tauri-apps/plugin-dialog";
 import type { GitStatus, GitCommit } from "../types";
 
 // ---- Graph layout --------------------------------------------------------
@@ -109,23 +110,52 @@ interface GitPanelProps {
   onRefresh: () => void;
   onStage: (path: string) => void;
   onUnstage: (path: string) => void;
+  onDiscard: (path: string) => void;
   onCommit: (message: string) => void;
   onInit: () => void;
   onOpenDiff: (path: string, rawDiff: string) => void;
   onOpenCommit: (hash: string, rawDiff: string) => void;
 }
 
+interface FileContextMenu {
+  x: number;
+  y: number;
+  path: string;
+  staged: boolean;
+  status: string;
+}
+
 type GitTab = "changes" | "history";
 
-export function GitPanel({ status, commits, onRefresh, onStage, onUnstage, onCommit, onInit, onOpenDiff, onOpenCommit }: GitPanelProps) {
+export function GitPanel({ status, commits, onRefresh, onStage, onUnstage, onDiscard, onCommit, onInit, onOpenDiff, onOpenCommit }: GitPanelProps) {
   const [tab, setTab] = useState<GitTab>("changes");
   const [commitMsg, setCommitMsg] = useState("");
   const [width, setWidth] = useState(240);
   const isDragging = useRef(false);
   const startX = useRef(0);
   const startWidth = useRef(0);
+  const [fileCtxMenu, setFileCtxMenu] = useState<FileContextMenu | null>(null);
+  const fileCtxMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => { onRefresh(); }, []);
+
+  useEffect(() => {
+    if (!fileCtxMenu) return;
+    const onMouseDown = (ev: globalThis.MouseEvent) => {
+      const el = fileCtxMenuRef.current;
+      if (!el) return;
+      if (ev.target instanceof Node && el.contains(ev.target)) return;
+      setFileCtxMenu(null);
+    };
+    window.addEventListener("mousedown", onMouseDown);
+    return () => window.removeEventListener("mousedown", onMouseDown);
+  }, [fileCtxMenu]);
+
+  const handleFileContextMenu = (e: MouseEvent, path: string, staged: boolean, status: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setFileCtxMenu({ x: e.clientX, y: e.clientY, path, staged, status });
+  };
 
   const graph = computeGraph(commits);
   const staged = status.files.filter((f) => f.staged);
@@ -206,7 +236,10 @@ export function GitPanel({ status, commits, onRefresh, onStage, onUnstage, onCom
                 <div className="git-section">
                   <div className="git-section-title">ステージ済み</div>
                   {staged.map((f) => (
-                    <div key={f.path} className="git-file-row" style={{ cursor: "pointer" }} onClick={() => handleFileClick(f.path)}>
+                    <div key={f.path} className="git-file-row" style={{ cursor: "pointer" }}
+                      onClick={() => handleFileClick(f.path)}
+                      onContextMenu={(e) => handleFileContextMenu(e, f.path, true, f.status)}
+                    >
                       <span className="git-status-badge" style={{ color: statusColor(f.status) }}>{f.status}</span>
                       <span className="git-file-name" title={f.path}>{shortPath(f.path)}</span>
                       <button className="git-file-btn" onClick={(e) => { e.stopPropagation(); onUnstage(f.path); }} title="ステージ解除">−</button>
@@ -218,7 +251,10 @@ export function GitPanel({ status, commits, onRefresh, onStage, onUnstage, onCom
                 <div className="git-section">
                   <div className="git-section-title">変更</div>
                   {unstaged.map((f) => (
-                    <div key={f.path} className="git-file-row" style={{ cursor: "pointer" }} onClick={() => handleFileClick(f.path)}>
+                    <div key={f.path} className="git-file-row" style={{ cursor: "pointer" }}
+                      onClick={() => handleFileClick(f.path)}
+                      onContextMenu={(e) => handleFileContextMenu(e, f.path, false, f.status)}
+                    >
                       <span className="git-status-badge" style={{ color: statusColor(f.status) }}>{f.status}</span>
                       <span className="git-file-name" title={f.path}>{shortPath(f.path)}</span>
                       <button className="git-file-btn" onClick={(e) => { e.stopPropagation(); onStage(f.path); }} title="ステージ">＋</button>
@@ -253,6 +289,50 @@ export function GitPanel({ status, commits, onRefresh, onStage, onUnstage, onCom
             </div>
           )}
         </>
+      )}
+      {fileCtxMenu && (
+        <div
+          className="tab-context-menu"
+          style={{ top: fileCtxMenu.y, left: fileCtxMenu.x }}
+          ref={fileCtxMenuRef}
+          onClick={(e) => e.stopPropagation()}
+          onContextMenu={(e) => e.preventDefault()}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          {(fileCtxMenu.status === "M" || fileCtxMenu.status === "A") && (
+            <button className="tab-context-menu-item" onClick={() => { void handleFileClick(fileCtxMenu.path); setFileCtxMenu(null); }}>
+              差分を表示
+            </button>
+          )}
+          {(fileCtxMenu.status === "M" || fileCtxMenu.status === "A") && (
+            <div className="tab-context-menu-separator" />
+          )}
+          {fileCtxMenu.staged ? (
+            <button className="tab-context-menu-item" onClick={() => { onUnstage(fileCtxMenu.path); setFileCtxMenu(null); }}>
+              ステージから除外
+            </button>
+          ) : (
+            <button className="tab-context-menu-item" onClick={() => { onStage(fileCtxMenu.path); setFileCtxMenu(null); }}>
+              ステージに追加
+            </button>
+          )}
+          {!fileCtxMenu.staged && fileCtxMenu.status !== "?" && (
+            <>
+              <div className="tab-context-menu-separator" />
+              <button
+                className="tab-context-menu-item tab-context-menu-item--danger"
+                onClick={async () => {
+                  const path = fileCtxMenu.path;
+                  setFileCtxMenu(null);
+                  const ok = await confirm(`「${shortPath(path)}」の変更を破棄しますか？この操作は元に戻せません。`, { title: "変更の破棄", kind: "warning" });
+                  if (ok) onDiscard(path);
+                }}
+              >
+                変更を破棄
+              </button>
+            </>
+          )}
+        </div>
       )}
     </div>
   );

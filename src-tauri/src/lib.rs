@@ -6,6 +6,9 @@ mod git;
 mod watcher;
 mod ai;
 mod bibtex;
+mod vertex_ai;
+mod memory_budget;
+mod terminal;
 
 use std::sync::{Arc, Mutex, RwLock};
 use config::Config;
@@ -21,6 +24,9 @@ pub struct AppState {
 impl AppState {
     pub fn new() -> Result<Self, String> {
         let config = Config::load();
+        crate::memory_budget::apply_optional_address_space_limit(
+            config.performance.max_system_memory_fraction,
+        );
         let db = Database::new()?;
         Ok(Self {
             config: Arc::new(RwLock::new(config)),
@@ -36,6 +42,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .manage(state)
+        .manage(terminal::TerminalState::default())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
@@ -68,6 +75,7 @@ pub fn run() {
             commands::git_repo_status,
             commands::git_stage,
             commands::git_unstage,
+            commands::git_discard,
             commands::git_commit,
             commands::git_log,
             commands::git_show,
@@ -80,6 +88,10 @@ pub fn run() {
             commands::detect_contradictions,
             commands::get_weekly_summary,
             commands::generate_weekly_summary,
+            commands::analyze_vault_for_graph,
+            terminal::terminal_create,
+            terminal::terminal_write,
+            terminal::terminal_resize,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
