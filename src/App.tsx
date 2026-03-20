@@ -9,6 +9,7 @@ import { GitPanel } from "./components/GitPanel";
 import { NotificationContainer } from "./components/NotificationContainer";
 import { AiChatPanel } from "./components/AiChatPanel";
 import GraphPanel from "./components/GraphPanel";
+import { TerminalPanel } from "./components/TerminalPanel";
 import { LeftActivityBar, RightActivityBar } from "./components/ActivityBar";
 import { useVault } from "./hooks/useVault";
 import { useAppMenu } from "./hooks/useAppMenu";
@@ -24,7 +25,7 @@ const newTabId = () => `tab-${++tabCounter}`;
 const EMPTY_PANE: PaneState = { tabs: [], activeId: null };
 
 function App() {
-  const { files, listFiles, openFile, saveFile, createFile, createDir, deleteFile, getMarginAnnotations, getBacklinks } = useVault();
+  const { files, listFiles, openFile, saveFile, createFile, createDir, deleteFile, renameFile, getMarginAnnotations, getBacklinks } = useVault();
 
   const [leftPane, setLeftPane] = useState<PaneState>(EMPTY_PANE);
   const [rightPane, setRightPane] = useState<PaneState>(EMPTY_PANE);
@@ -33,6 +34,8 @@ function App() {
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [rightPanel, setRightPanel] = useState<"git" | "ai" | "graph" | "margin" | null>("margin");
+  const [terminalOpen, setTerminalOpen] = useState(false);
+  const [terminalHeight, setTerminalHeight] = useState(220);
   const [vaultName, setVaultName] = useState("");
 
   const toggleRightPanel = (panel: "git" | "ai" | "graph" | "margin") => {
@@ -41,7 +44,7 @@ function App() {
   const [vaultPath, setVaultPath] = useState("");
 
   const { modelStatus, messages, isGenerating, loadModel, generateText, clearMessages } = useAI();
-  const { status: gitStatus, commits: gitCommits, refresh: refreshGit, stage: gitStage, unstage: gitUnstage, commit: gitCommit, initRepo: gitInit } = useGit();
+  const { status: gitStatus, commits: gitCommits, refresh: refreshGit, stage: gitStage, unstage: gitUnstage, discard: gitDiscard, commit: gitCommit, initRepo: gitInit } = useGit();
   const [folderExpandSignal, setFolderExpandSignal] = useState<boolean | null>(null);
 
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -196,6 +199,23 @@ function App() {
     setPane(paneId, () => ({ tabs: [], activeId: null }));
   }, [getPane, saveFile, setPane]);
 
+  // ---- terminal ---------------------------------------------------------------
+
+  const handleTerminalResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startHeight = terminalHeight;
+    const onMove = (ev: MouseEvent) => {
+      setTerminalHeight(Math.max(100, Math.min(600, startHeight + startY - ev.clientY)));
+    };
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }, [terminalHeight]);
+
   // ---- split (open in other pane) ---------------------------------------------
 
   const handleSplitTab = useCallback((tabId: string, fromPaneId: "left" | "right") => {
@@ -260,10 +280,93 @@ function App() {
   const handleDelete = useCallback(async (path: string) => {
     await deleteFile(path);
     for (const paneId of ["left", "right"] as const) {
-      const tab = getPane(paneId).tabs.find((t) => t.path === path);
-      if (tab) await closeTabInPane(tab.id, paneId);
+      const affectedTabs = getPane(paneId).tabs.filter(
+        (t) => t.tabType === "file" && (t.path === path || t.path.startsWith(`${path}/`))
+      );
+      for (const tab of affectedTabs) await closeTabInPane(tab.id, paneId);
     }
   }, [deleteFile, getPane, closeTabInPane]);
+
+  const handleRename = useCallback(async (oldPath: string, newPath: string) => {
+    const ok = await renameFile(oldPath, newPath);
+    if (!ok) return;
+
+    const updatePath = (p: string) => {
+      if (p === oldPath) return newPath;
+      if (p.startsWith(`${oldPath}/`)) return `${newPath}${p.slice(oldPath.length)}`;
+      return p;
+    };
+
+    const leftAffected = leftPane.tabs
+      .filter((t) => t.tabType === "file" && (t.path === oldPath || t.path.startsWith(`${oldPath}/`)))
+      .map((t) => ({ tabId: t.id, newPath: updatePath(t.path) }));
+    const rightAffected = rightPane.tabs
+      .filter((t) => t.tabType === "file" && (t.path === oldPath || t.path.startsWith(`${oldPath}/`)))
+      .map((t) => ({ tabId: t.id, newPath: updatePath(t.path) }));
+
+    if (leftAffected.length > 0) {
+      const map = new Map(leftAffected.map((a) => [a.tabId, a.newPath] as const));
+      setLeftPane((prev) => ({
+        ...prev,
+        tabs: prev.tabs.map((t) => (map.has(t.id) ? { ...t, path: map.get(t.id)! } : t)),
+      }));
+    }
+    if (rightAffected.length > 0) {
+      const map = new Map(rightAffected.map((a) => [a.tabId, a.newPath] as const));
+      setRightPane((prev) => ({
+        ...prev,
+        tabs: prev.tabs.map((t) => (map.has(t.id) ? { ...t, path: map.get(t.id)! } : t)),
+      }));
+    }
+
+    const affectedAll = [
+      ...leftAffected.map((a) => ({ ...a, paneId: "left" as const })),
+      ...rightAffected.map((a) => ({ ...a, paneId: "right" as const })),
+    ];
+    if (affectedAll.length === 0) return;
+
+    const results = await Promise.all(
+      affectedAll.map(async ({ tabId, newPath, paneId }) => ({
+        paneId,
+        tabId,
+        annotations: await getMarginAnnotations(newPath),
+        backlinks: await getBacklinks(newPath),
+      }))
+    );
+
+    const leftUpdates = results.filter((r) => r.paneId === "left");
+    const rightUpdates = results.filter((r) => r.paneId === "right");
+
+    if (leftUpdates.length > 0) {
+      const map = new Map(leftUpdates.map((r) => [r.tabId, { annotations: r.annotations, backlinks: r.backlinks }] as const));
+      setLeftPane((prev) => ({
+        ...prev,
+        tabs: prev.tabs.map((t) => {
+          const u = map.get(t.id);
+          return u ? { ...t, annotations: u.annotations, backlinks: u.backlinks } : t;
+        }),
+      }));
+    }
+
+    if (rightUpdates.length > 0) {
+      const map = new Map(rightUpdates.map((r) => [r.tabId, { annotations: r.annotations, backlinks: r.backlinks }] as const));
+      setRightPane((prev) => ({
+        ...prev,
+        tabs: prev.tabs.map((t) => {
+          const u = map.get(t.id);
+          return u ? { ...t, annotations: u.annotations, backlinks: u.backlinks } : t;
+        }),
+      }));
+    }
+  }, [
+    renameFile,
+    leftPane,
+    rightPane,
+    setLeftPane,
+    setRightPane,
+    getMarginAnnotations,
+    getBacklinks,
+  ]);
 
   const handleOpenNote = useCallback((path: string) => handleSelectFile(path), [handleSelectFile]);
 
@@ -314,7 +417,11 @@ function App() {
         <LeftActivityBar
           sidebarOpen={sidebarOpen}
           onToggleSidebar={() => setSidebarOpen((v) => !v)}
+          terminalOpen={terminalOpen}
+          onToggleTerminal={() => setTerminalOpen((v) => !v)}
         />
+        <div className="app-body-center">
+        <div className="app-body-main">
         {sidebarOpen && (
           <FileTree
             files={files}
@@ -327,6 +434,7 @@ function App() {
             onCreate={handleCreate}
             onCreateDir={handleCreateDir}
             onDelete={handleDelete}
+            onRename={handleRename}
           />
         )}
 
@@ -373,6 +481,7 @@ function App() {
             onUnstage={gitUnstage}
             onCommit={gitCommit}
             onInit={gitInit}
+            onDiscard={gitDiscard}
             onOpenDiff={handleOpenDiff}
             onOpenCommit={handleOpenCommit}
           />
@@ -400,6 +509,14 @@ function App() {
             onOpenNote={handleOpenNote}
           />
         )}
+        </div>{/* app-body-main */}
+        <TerminalPanel
+          isOpen={terminalOpen}
+          height={terminalHeight}
+          vaultPath={vaultPath}
+          onResizeStart={handleTerminalResizeStart}
+        />
+      </div>{/* app-body-center */}
         <RightActivityBar
           rightPanel={rightPanel}
           onToggleRightPanel={toggleRightPanel}

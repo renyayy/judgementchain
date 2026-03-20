@@ -12,6 +12,7 @@ import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import "highlight.js/styles/github-dark.css";
 import { wikilinkPlugin, wikilinkClickHandler } from "../extensions/wikilinks";
+import { wordCompletionExtension } from "../extensions/wordCompletion";
 
 type ViewMode = "edit" | "split" | "preview";
 
@@ -53,9 +54,19 @@ function isMarkdownFile(path: string) {
   return path.toLowerCase().endsWith(".md");
 }
 
+function isAdocFile(path: string) {
+  return path.toLowerCase().endsWith(".adoc");
+}
+
 export function Editor({ content, filePath, isDirty, onChange, onNavigate }: EditorProps) {
   const [extensions, setExtensions] = useState<Extension[]>(sharedExtensions);
   const [viewMode, setViewMode] = useState<ViewMode>("edit");
+
+  useEffect(() => {
+    if (!filePath || !isMarkdownFile(filePath)) {
+      setViewMode("edit");
+    }
+  }, [filePath]);
 
   useEffect(() => {
     if (!filePath) {
@@ -77,11 +88,21 @@ export function Editor({ content, filePath, isDirty, onChange, onNavigate }: Edi
         return;
       }
 
+      const completionExtension = isAdocFile(filePath) ? null : wordCompletionExtension(filePath);
+      const baseExtensions: Extension[] = completionExtension
+        ? [...sharedExtensions, completionExtension]
+        : [...sharedExtensions];
+
       const fileName = getFileName(filePath);
       const description = LanguageDescription.matchFilename(languages, fileName);
-      const loaded = description ? await description.load() : null;
-      const languageExtensions: Extension[] = loaded ? [...sharedExtensions, loaded] : [...sharedExtensions];
-      if (!cancelled) setExtensions(languageExtensions);
+      try {
+        const loaded = description ? await description.load() : null;
+        const languageExtensions: Extension[] = loaded ? [...baseExtensions, loaded] : baseExtensions;
+        if (!cancelled) setExtensions(languageExtensions);
+      } catch {
+        // `@codemirror/lang-*` が未導入の場合などでも、エディタが壊れないようフォールバックする
+        if (!cancelled) setExtensions(baseExtensions);
+      }
     };
 
     void buildExtensions();
@@ -123,29 +144,31 @@ export function Editor({ content, filePath, isDirty, onChange, onNavigate }: Edi
           {getFileName(filePath)}
           {isDirty && <span className="editor-dirty-indicator">●</span>}
         </span>
-        <div className="view-mode-toggle">
-          <button
-            className={viewMode === "edit" ? "active" : ""}
-            onClick={() => setViewMode("edit")}
-            title="編集"
-          >
-            編集
-          </button>
-          <button
-            className={viewMode === "split" ? "active" : ""}
-            onClick={() => setViewMode("split")}
-            title="分割"
-          >
-            分割
-          </button>
-          <button
-            className={viewMode === "preview" ? "active" : ""}
-            onClick={() => setViewMode("preview")}
-            title="プレビュー"
-          >
-            プレビュー
-          </button>
-        </div>
+        {isMarkdownFile(filePath) && (
+          <div className="view-mode-toggle">
+            <button
+              className={viewMode === "edit" ? "active" : ""}
+              onClick={() => setViewMode("edit")}
+              title="編集"
+            >
+              編集
+            </button>
+            <button
+              className={viewMode === "split" ? "active" : ""}
+              onClick={() => setViewMode("split")}
+              title="分割"
+            >
+              分割
+            </button>
+            <button
+              className={viewMode === "preview" ? "active" : ""}
+              onClick={() => setViewMode("preview")}
+              title="プレビュー"
+            >
+              プレビュー
+            </button>
+          </div>
+        )}
       </div>
 
       <div className={`editor-body editor-body--${viewMode}`}>

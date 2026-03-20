@@ -3,6 +3,8 @@ type RightPanel = "git" | "ai" | "graph" | "margin";
 interface LeftActivityBarProps {
   sidebarOpen: boolean;
   onToggleSidebar: () => void;
+  terminalOpen: boolean;
+  onToggleTerminal: () => void;
 }
 
 interface RightActivityBarProps {
@@ -10,16 +12,27 @@ interface RightActivityBarProps {
   onToggleRightPanel: (panel: RightPanel) => void;
 }
 
-export function LeftActivityBar({ sidebarOpen, onToggleSidebar }: LeftActivityBarProps) {
+export function LeftActivityBar({ sidebarOpen, onToggleSidebar, terminalOpen, onToggleTerminal }: LeftActivityBarProps) {
   return (
     <div className="activity-bar activity-bar--left">
-      <button
-        className={`activity-btn ${sidebarOpen ? "active" : ""}`}
-        onClick={onToggleSidebar}
-        title="ファイルツリー"
-      >
-        ☰
-      </button>
+      <div className="activity-bar-top">
+        <button
+          className={`activity-btn ${sidebarOpen ? "active" : ""}`}
+          onClick={onToggleSidebar}
+          title="ファイルツリー"
+        >
+          ☰
+        </button>
+      </div>
+      <div className="activity-bar-bottom">
+        <button
+          className={`activity-btn ${terminalOpen ? "active" : ""}`}
+          onClick={onToggleTerminal}
+          title="ターミナル"
+        >
+          ⌨
+        </button>
+      </div>
     </div>
   );
 }

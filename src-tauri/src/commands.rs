@@ -636,6 +636,16 @@ pub async fn git_unstage(file_path: String, state: State<'_, AppState>) -> Resul
 }
 
 #[tauri::command]
+pub async fn git_discard(file_path: String, state: State<'_, AppState>) -> Result<bool, String> {
+    let vault_path = {
+        let config = state.config.read().map_err(|e| format!("Config lock error: {}", e))?;
+        config.get_vault_path().to_string_lossy().to_string()
+    };
+    crate::git::discard_file(&vault_path, &file_path)?;
+    Ok(true)
+}
+
+#[tauri::command]
 pub async fn git_commit(message: String, state: State<'_, AppState>) -> Result<bool, String> {
     let vault_path = {
         let config = state.config.read().map_err(|e| format!("Config lock error: {}", e))?;

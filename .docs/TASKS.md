@@ -36,6 +36,7 @@
 | T-104 | done   | nomos-editor-backend  | Vault I/O（Markdown読み書き）               | `.kiro/specs/nomos-editor/requirements.md`                                        | vault.rs で実装済み                                                     |
 | T-105 | done   | nomos-editor-backend  | ファイルツリーAPI（一覧 + 作成 + 削除の最低限）          | `.kiro/specs/nomos-editor/requirements.md`                                        | 再帰的ツリー、trash移動、APIすべて実装済み                                          |
 | T-106 | done   | nomos-editor-backend  | ファイル変更監視（外部編集を検出）                     | `.kiro/specs/nomos-editor/requirements.md` / `.kiro/specs/nomos-editor/design.md` | `src-tauri/src/watcher.rs` でnotifyクレートを使用。vault:changedイベントで自動リロード |
+| T-107 | done   | nomos-editor-frontend | ファイルツリー基本コンテキストメニュー（右クリック）     | `.kiro/specs/nomos-editor/requirements.md` / `.kiro/specs/nomos-editor/design.md` | 右クリックで`開く/新規ノート/新規フォルダ/リネーム/削除/プロパティ`が表示され、CRUD実行後も開いているタブが破綻しない |
 
 
 ### Phase 1 – Infra / Git / Logging（他と並列可）
