@@ -81,7 +81,7 @@ export interface GraphData {
 
 export type AnalysisStatus = "idle" | "analyzing" | "done" | "error";
 
-export type EditorTabType = "file" | "diff" | "commit";
+export type EditorTabType = "file" | "diff" | "commit" | "settings";
 
 export interface EditorTab {
   id: string;

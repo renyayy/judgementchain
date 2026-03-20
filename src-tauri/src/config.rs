@@ -111,15 +111,30 @@ impl Default for Config {
 impl Config {
     pub fn load() -> Self {
         let config_path = Self::config_file_path();
-        if let Some(path) = config_path {
+        if let Some(path) = &config_path {
+            eprintln!("[config] loading from: {}", path.display());
             if path.exists() {
-                if let Ok(content) = std::fs::read_to_string(&path) {
-                    if let Ok(config) = toml::from_str::<Config>(&content) {
-                        return config;
+                match std::fs::read_to_string(path) {
+                    Ok(content) => {
+                        match toml::from_str::<Config>(&content) {
+                            Ok(config) => {
+                                eprintln!("[config] loaded OK, ai.backend={}, project_id={}", config.ai.backend, config.ai.vertex_ai_project_id);
+                                return config;
+                            }
+                            Err(e) => {
+                                eprintln!("[config] TOML parse error: {}", e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[config] file read error: {}", e);
                     }
                 }
+            } else {
+                eprintln!("[config] file not found: {}", path.display());
             }
         }
+        eprintln!("[config] using default config");
         Config::default()
     }
 
