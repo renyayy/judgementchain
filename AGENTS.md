@@ -26,13 +26,26 @@ cd src-tauri && cargo check
 bun tauri info
 ```
 
+ツールチェーン管理は `mise.toml`（bun latest, rust latest）。`MACOSX_DEPLOYMENT_TARGET=10.15`。
+
 Rustのplatform features: macOSは `metal`、Linuxは `cuda` が利用可能（`Cargo.toml` の `[features]`）。
+
+テスト・lint・CIは未整備（eslint/biome/clippy/GitHub Actions なし）。
 
 ---
 
 ## アーキテクチャ
 
 Tauri v2 デスクトップアプリ。Rustバックエンド + React/TypeScriptフロントエンド。
+
+### データフロー
+
+```
+Frontend → invoke() → Tauri Command → Backend（同期/非同期）
+Backend  → emit()   → Event        → Frontend listener（listen()）
+```
+
+フロントエンドからの操作は `@tauri-apps/api` の `invoke()` でRustコマンドを呼び出し、バックエンドからの非同期通知は `listen()` でイベントを受け取る。
 
 ### バックエンド（`src-tauri/src/`）
 
@@ -55,18 +68,38 @@ Tauri v2 デスクトップアプリ。Rustバックエンド + React/TypeScript
 
 ### フロントエンド（`src/`）
 
+グローバルstate管理ライブラリ（Redux/Zustand/Context）は未使用。すべてReact hooksでローカル管理。設定は `localStorage` に永続化。
+
+#### 主要コンポーネント（`src/components/`）
+
 | ファイル | 役割 |
 |---|---|
 | `App.tsx` | メインレイアウト（サイドバー、エディタペイン、右パネル、ターミナル） |
-| `components/Editor.tsx` | CodeMirror 6エディタ |
-| `components/MarginPanel.tsx` | Judgement Brain マージン注釈UI |
-| `components/GraphPanel.tsx` | Cytoscape.jsグラフ可視化 |
-| `components/GitPanel.tsx` | Git操作UI |
-| `hooks/useVault.ts` | ファイル操作フック |
-| `hooks/useGit.ts` | Git操作フック |
-| `hooks/useAI.ts` | AI推論フック |
-| `lib/editorThemes.ts` | CodeMirrorカスタムテーマ定義 |
-| `types/index.ts` | 共通型定義（GraphNode, GraphEdge等） |
+| `Editor.tsx` | CodeMirror 6エディタ |
+| `EditorPane.tsx` | タブ管理 |
+| `MarginPanel.tsx` | Judgement Brain マージン注釈UI |
+| `GraphPanel.tsx` | Cytoscape.jsグラフ可視化 |
+| `GitPanel.tsx` / `GitDiff.tsx` | Git操作UI |
+| `AiChatPanel.tsx` | AIチャットインターフェース |
+| `TerminalPanel.tsx` | PTYターミナル |
+| `SettingsPanel.tsx` | 設定画面 |
+
+#### Hooks（`src/hooks/`）
+
+| フック | 役割 |
+|---|---|
+| `useVault.ts` | ファイル操作（一覧・開く・保存・作成・削除・リネーム） |
+| `useGit.ts` | Git操作 |
+| `useAI.ts` | LLM連携（モデル読込・テキスト生成・イベントストリーミング） |
+| `useSettings.ts` | localStorage永続化設定（テーマ、フォントサイズ） |
+| `useGraphAnalysis.ts` | グラフ分析 |
+| `useNotifications.ts` | トースト通知 |
+| `useAppMenu.ts` | アプリメニュー連携 |
+
+#### CodeMirror拡張（`src/extensions/`）
+
+- `wikilinks.ts` — `[[link]]` 構文のデコレーションプラグイン
+- `wordCompletion.ts` — 単語補完
 
 ### AIアーキテクチャ（3層構造）
 
