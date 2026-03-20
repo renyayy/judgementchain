@@ -7,12 +7,10 @@ import { languages } from "@codemirror/language-data";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { EditorView } from "@codemirror/view";
 import { Extension } from "@codemirror/state";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import rehypeHighlight from "rehype-highlight";
 import "highlight.js/styles/github-dark.css";
 import { wikilinkPlugin, wikilinkClickHandler } from "../extensions/wikilinks";
 import { wordCompletionExtension } from "../extensions/wordCompletion";
+import { MarkdownPreview } from "./MarkdownPreview";
 
 type ViewMode = "edit" | "split" | "preview";
 
@@ -210,14 +208,9 @@ export function Editor({ content, filePath, isDirty, onChange, onNavigate }: Edi
           </div>
         )}
 
-        {(viewMode === "preview" || viewMode === "split") && (
+        {isMarkdownFile(filePath) && (viewMode === "preview" || viewMode === "split") && (
           <div className="preview-pane">
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              rehypePlugins={[rehypeHighlight]}
-            >
-              {content}
-            </ReactMarkdown>
+            <MarkdownPreview content={content} />
           </div>
         )}
       </div>

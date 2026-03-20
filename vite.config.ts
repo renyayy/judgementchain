@@ -1,12 +1,23 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { visualizer } from "rollup-plugin-visualizer";
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
 export default defineConfig(async () => ({
-  plugins: [react()],
+  plugins: [
+    react(),
+    visualizer({ 
+      // ビルド後に出力されるファイル名
+      filename: 'bundledFileStatus.html',
+      // ビルド後に出力されるファイルを自動で開くかどうか
+      open: true ,
+      // テンプレートの種類
+      template:'treemap',
+    })
+  ],
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
@@ -27,6 +38,27 @@ export default defineConfig(async () => ({
     watch: {
       // 3. tell Vite to ignore watching `src-tauri`
       ignored: ["**/src-tauri/**"],
+    },
+  },
+
+  build: {
+    chunkSizeWarningLimit: 800,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          react: ["react", "react-dom"],
+          // cytoscape を専用の塊に分ける
+          cytoscape: ["cytoscape"], 
+          codemirror: [
+            "@uiw/react-codemirror",
+            "@codemirror/commands",
+            "@codemirror/lang-markdown",
+            "@codemirror/theme-one-dark",
+            "@codemirror/view",
+          ],
+          markdown: ["react-markdown", "remark-gfm", "rehype-highlight"],
+        },
+      },
     },
   },
 }));

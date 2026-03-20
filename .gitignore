@@ -34,3 +34,4 @@ judgement-brain_{{version}}_aarch64.dmg
 
 .env
 .env.*
+mise.prod.toml

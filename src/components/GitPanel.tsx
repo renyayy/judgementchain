@@ -183,7 +183,7 @@ export function GitPanel({ status, commits, onRefresh, onStage, onUnstage, onDis
     startX.current = e.clientX;
     startWidth.current = width;
     document.body.classList.add("resizing");
-    const onMouseMove = (e: MouseEvent) => {
+    const onMouseMove = (e: globalThis.MouseEvent) => {
       if (!isDragging.current) return;
       setWidth(Math.max(180, Math.min(480, startWidth.current - (e.clientX - startX.current))));
     };
