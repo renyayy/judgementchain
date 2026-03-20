@@ -1,124 +1,103 @@
-# AI Agents 運用ルール（このリポジトリ）
+# CLAUDE.md
 
-このドキュメントは、AIエージェントが本リポジトリで開発を進めるための **共通運用ルール** です。
-
----
-
-## 基本原則
-
-- **ローカルファースト**: 外部依存を最小化し、データ所有権・プライバシーを最優先する。
-- **小さく確実に**: PR/コミットは小さく、差分の理由が追える単位にする。
-- **不明点が出た場合**: 実装で補完せず、`.issues/` に記録する。
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ---
 
-## プロジェクト概要
+## ビルド・開発コマンド
 
-「自分のデジタルツインをローカルで育てるエディタ」— **Obsidianの完全置き換え** を目指すローカルファーストのナレッジエディタ。
+```bash
+# 開発サーバー起動（Tauri + Vite）
+bun tauri dev
 
-### 技術スタック
+# プロダクションビルド
+bun tauri build --config src-tauri/tauri.release.conf.json
 
-| 層 | 技術 |
+# フロントエンドのみビルド
+bun run build
+
+# Rustのみビルド確認
+cd src-tauri && cargo build
+
+# Rustの型チェック（ビルドより高速）
+cd src-tauri && cargo check
+
+# 環境確認
+bun tauri info
+```
+
+Rustのplatform features: macOSは `metal`、Linuxは `cuda` が利用可能（`Cargo.toml` の `[features]`）。
+
+---
+
+## アーキテクチャ
+
+Tauri v2 デスクトップアプリ。Rustバックエンド + React/TypeScriptフロントエンド。
+
+### バックエンド（`src-tauri/src/`）
+
+| モジュール | 役割 |
 |---|---|
-| シェル | Tauri v2 |
-| フロントエンド | TypeScript + React |
-| エディタコア | CodeMirror 6 |
-| バックエンド | Rust |
-| ローカルLLM | Gemma 3 1B GGUF（llama-cpp-2 / Ollama） |
-| Embedding | nomic-embed-text（Ollama経由） |
-| グラフ分析 | Google Vertex AI（Gemini API） |
-| DB | SQLite（rusqlite） |
-| Git | gitoxide |
+| `lib.rs` | AppState定義、Tauriコマンド登録（35+コマンド）、プラグイン設定 |
+| `commands.rs` | Tauriコマンド実装（ファイル操作、AI、Git、グラフ分析） |
+| `config.rs` | `~/.config/nomos/config.toml` の読み書き |
+| `database.rs` | SQLite操作（embedding保存・類似検索、活動ログ、週次サマリ） |
+| `vault.rs` | Vault内ファイル一覧・読み書き |
+| `ai.rs` | Ollama連携（embedding生成、Gemma推論） |
+| `vertex_ai.rs` | Vertex AI (Gemini API) JWT認証・呼び出し |
+| `bibtex.rs` | BibTeXパース・論文紐付け |
+| `git.rs` | gitoxide連携（status, stage, commit, log, diff） |
+| `watcher.rs` | ファイル変更監視（notify crate） |
+| `terminal.rs` | PTY端末（portable-pty + xterm.js） |
+| `memory_budget.rs` | メモリ使用量制限 |
+
+**AppState**（`lib.rs`）: `Arc<RwLock<Config>>`, `Arc<Database>`, `Arc<Mutex<Option<CandleState>>>` を保持。
+
+### フロントエンド（`src/`）
+
+| ファイル | 役割 |
+|---|---|
+| `App.tsx` | メインレイアウト（サイドバー、エディタペイン、右パネル、ターミナル） |
+| `components/Editor.tsx` | CodeMirror 6エディタ |
+| `components/MarginPanel.tsx` | Judgement Brain マージン注釈UI |
+| `components/GraphPanel.tsx` | Cytoscape.jsグラフ可視化 |
+| `components/GitPanel.tsx` | Git操作UI |
+| `hooks/useVault.ts` | ファイル操作フック |
+| `hooks/useGit.ts` | Git操作フック |
+| `hooks/useAI.ts` | AI推論フック |
+| `lib/editorThemes.ts` | CodeMirrorカスタムテーマ定義 |
+| `types/index.ts` | 共通型定義（GraphNode, GraphEdge等） |
 
 ### AIアーキテクチャ（3層構造）
 
 ```
-Layer 1: Embedding（常時）
-  └─ nomic-embed-text — 保存のたびにベクトル化
-  └─ マージン注釈のリアルタイム類似検索に使用
-
-Layer 2: 1B推論（オンデマンド・バックグラウンド）
-  └─ Gemma 3 1B (CPU動作)
-  └─ 矛盾検出・論文紐付け・週次サマリ
-
-Layer 3: 拡張推論（ユーザー設定）
-  └─ ModelBackend traitで任意モデルに切り替え
-  └─ Ollama経由で大型モデルも可
+Layer 1: Embedding（常時） — nomic-embed-text、保存のたびにベクトル化、マージン注釈の類似検索
+Layer 2: 1B推論（バックグラウンド） — Gemma 3 1B (CPU)、矛盾検出・論文紐付け・週次サマリ
+Layer 3: 拡張推論（ユーザー設定） — Ollama経由で大型モデル、Vertex AI (Gemini) でグラフ分析
 ```
 
-**設計判断**: リアルタイム注釈はembeddingのみ、Gemma推論はブロッキングしない。
+**設計判断**: リアルタイム注釈はembeddingのみ、LLM推論はブロッキングしない。
 
-### Judgement Brain（マージン注釈）
+### DB設計（SQLite `~/.local/share/nomos/nomos.db`）
 
-| アイコン | 種類 | トリガー |
-|---|---|---|
-| 💡 | 関連過去ノート | embedding類似度が閾値超（cosine > 0.7） |
-| ⚡ | 矛盾・一致の指摘 | Gemma推論（2秒アイドル後、1時間キャッシュ） |
-| 📄 | 論文・文献との紐付け | BibTeXメタデータ + キーワードマッチ |
-| 📊 | 週次サマリ | Gemma週次バッチ生成 |
-
-### Graph Panel（階層構造可視化）
-
-Vertex AI (Gemini API) を使った3フェーズ処理:
-1. **キーワード抽出** — 5ファイルずつバッチでGeminiに渡し、各ファイルから3〜5個のキーワード抽出
-2. **グルーピング** — キーワード類似性で4〜8グループに分類
-3. **階層化** — グループを2つのトップグループにまとめ、日本語ラベル付与
-
-Cytoscape.js + dagre レイアウトで可視化。ファイルノードクリックでエディタに遷移。
-
-### DB設計（SQLite主要テーブル）
-
-- `activity_log` — ファイルパス、アクション（open/edit/close）、タイムスタンプ、滞在時間
 - `note_embeddings` — ファイルパス、768次元ベクトル（BLOB）、コンテンツハッシュ
+- `activity_log` — ファイルパス、アクション、タイムスタンプ、滞在時間
 - `weekly_summaries` — 週識別子、サマリ内容、生成日時
 - `wikilinks` — ソース、ターゲット、broken フラグ
 - `contradiction_cache` — JSON結果、1時間TTL
 
-### 設定ファイル
-
-```
-~/.config/nomos/config.toml    # vault path, AI設定, Git設定
-~/.local/share/nomos/nomos.db  # SQLite DB
-```
-
 ---
 
-## 作業フロー
-
-### 1) 課題の確認
-- `.issues/` を確認し、対象の課題を把握する
-
-### 2) タスク化
-- `.tasks/` に作業項目を作成し、対応するissueを紐付ける
-
-### 3) 実装
-- 変更は「どのissue/taskを解決するか」を明示する
-- 破壊的変更は、まず `.issues/` に代替案とトレードオフを記録してから着手する
-
-### 4) 検証
-- 可能な範囲で最小の再現・検証（lint / build / unit）を行う
-- 既存エラーの「巻き込み修正」は原則しない（必要なら別issue化）
-
----
-
-## コミュニケーション規約
+## 運用ルール
 
 - **回答言語**: 日本語
-- **記述スタイル**:
-  - 重要事項は **太字** で明示
-  - ファイル名・関数名・ディレクトリはバッククォートで囲う（例: `src-tauri/src/ai.rs`）
+- **ローカルファースト**: 外部依存を最小化し、データ所有権・プライバシーを最優先
+- **小さく確実に**: PR/コミットは小さく、差分の理由が追える単位にする。
+- **不明点が出た場合**: 実装で補完せず、`.issues/` に記録する。
+- **コミットメッセージ**: 短く（例: `feat: add vault watcher` / `fix: resolve 429 error`）。`docs:` / `feat:` / `fix:` / `refactor:` を使い分ける
 
----
+## 課題管理
 
-## コミット運用
-
-- **コミットメッセージは短く**（例: `docs: restructure project docs` / `feat: add vault watcher`）
-- ドキュメント更新は `docs:`、実装は `feat:` / `fix:` / `refactor:` を使う
-
----
-
-## タスク管理
-
-- **課題（何が問題か）**: `.issues/` に1ファイル1課題で管理
-- **作業項目（何をするか）**: `.tasks/` に1ファイル1タスクで管理
-- 各タスクは対応するissueを参照する
+- `.issues/` に1ファイル1課題で管理（問題＋やることを1ファイルに記述）
+- `.issues/editor/` にエディタ関連の課題
+- 変更は「どのissueを解決するか」を明示する
