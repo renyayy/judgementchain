@@ -806,6 +806,16 @@ pub async fn load_model(
     };
 
     let model_path = crate::ai::resolve_model_path(&app, Some(&configured_model_path))?;
+
+    let mem_frac = {
+        let config = state
+            .config
+            .read()
+            .map_err(|e| format!("Config lock error: {}", e))?;
+        config.performance.max_system_memory_fraction
+    };
+    crate::memory_budget::check_model_load_allowed(mem_frac, &model_path)?;
+
     let candle_arc = std::sync::Arc::clone(&state.candle);
 
     // モデルロードは重いので blocking スレッドで実行

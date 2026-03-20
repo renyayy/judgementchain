@@ -9,12 +9,33 @@ fn default_vertex_model() -> String {
     "gemini-2.0-flash-001".to_string()
 }
 
+fn default_max_system_memory_fraction() -> f64 {
+    0.8
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PerformanceConfig {
+    /// プロセスの仮想メモリ上限を、搭載物理メモリのこの割合に抑える（1.0 = 100%）。0 以下で無効。
+    #[serde(default = "default_max_system_memory_fraction")]
+    pub max_system_memory_fraction: f64,
+}
+
+impl Default for PerformanceConfig {
+    fn default() -> Self {
+        Self {
+            max_system_memory_fraction: default_max_system_memory_fraction(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub vault: VaultConfig,
     pub ai: AiConfig,
     pub git: GitConfig,
     pub judgement_brain: JudgementBrainConfig,
+    #[serde(default)]
+    pub performance: PerformanceConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -82,6 +103,7 @@ impl Default for Config {
                 contradiction_check_idle_ms: 3000,
                 update_debounce_ms: 500,
             },
+            performance: PerformanceConfig::default(),
         }
     }
 }

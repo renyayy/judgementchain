@@ -42,6 +42,8 @@ candle-nn = { git = "https://github.com/liverHawk/candle.git", branch = "main" }
 candle-transformers = { git = "https://github.com/liverHawk/candle.git", branch = "main" }
 tokenizers = "0.21"
 hf-hub = "0.4"
+sysinfo = { version = "0.33", default-features = false, features = ["system"] }
+libc = "0.2"
 
 [features]
 default = []

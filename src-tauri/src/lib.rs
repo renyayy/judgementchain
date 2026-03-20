@@ -7,6 +7,7 @@ mod watcher;
 mod ai;
 mod bibtex;
 mod vertex_ai;
+mod memory_budget;
 
 use std::sync::{Arc, Mutex, RwLock};
 use config::Config;
@@ -22,6 +23,9 @@ pub struct AppState {
 impl AppState {
     pub fn new() -> Result<Self, String> {
         let config = Config::load();
+        crate::memory_budget::apply_optional_address_space_limit(
+            config.performance.max_system_memory_fraction,
+        );
         let db = Database::new()?;
         Ok(Self {
             config: Arc::new(RwLock::new(config)),

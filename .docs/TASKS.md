@@ -46,6 +46,7 @@
 | T-111 | done   | nomos-editor-infra   | config.toml 読み込みとVault/AI/Git設定の反映    | `.kiro/specs/nomos-editor/requirements.md` / `.kiro/specs/nomos-editor/design.md` | `~/.config/nomos/config.toml` から読み込み、デフォルト値あり |
 | T-112 | done   | nomos-editor-infra   | Git自動commit（ON/OFF）とcommitメッセージテンプレート | `.kiro/specs/nomos-editor/requirements.md` / `.kiro/specs/nomos-editor/design.md` | `save_file`内で`git.auto_commit`フラグを確認し自動commit |
 | T-113 | done   | nomos-editor-backend | 行動ログ記録（SQLite: open/edit/close）       | `.kiro/specs/nomos-editor/requirements.md` / `.kiro/specs/nomos-editor/design.md` | `activity_log` テーブルに記録済み                      |
+| T-114 | done   | nomos-editor-infra   | 物理メモリの割合でプロセス上限（RLIMIT_AS + モデルロード前チェック） | `.kiro/specs/nomos-editor/design.md`（`[performance]`） | `config.performance.max_system_memory_fraction` 既定 0.8、`memory_budget.rs` |
 
 
 ### Phase 2 – Embedding / 関連ノート（💡）（AI/DB/FEで並列可）

@@ -37,6 +37,9 @@ export interface Config {
     vertex_ai_location?: string;
     vertex_ai_model?: string;
   };
+  performance?: {
+    max_system_memory_fraction?: number;
+  };
 }
 
 // ==================== グラフ可視化 ====================
