@@ -3,6 +3,7 @@ import { subscribe, type Notification } from "../lib/notifications";
 
 export function useNotifications() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [hiddenIds, setHiddenIds] = useState<string[]>([]);
 
   useEffect(() => {
     return subscribe((n) => {
@@ -11,8 +12,16 @@ export function useNotifications() {
   }, []);
 
   const dismiss = useCallback((id: string) => {
-    setNotifications((prev) => prev.filter((n) => n.id !== id));
+    // 通知をアプリ終了まで「履歴として保持」しつつ、表示だけを消す
+    setHiddenIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
   }, []);
 
-  return { notifications, dismiss };
+  const clearAll = useCallback(() => {
+    setNotifications([]);
+    setHiddenIds([]);
+  }, []);
+
+  const visibleNotifications = notifications.filter((n) => !hiddenIds.includes(n.id));
+
+  return { notifications, visibleNotifications, hiddenIds, dismiss, clearAll };
 }

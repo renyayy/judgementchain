@@ -13,17 +13,27 @@ fn default_max_system_memory_fraction() -> f64 {
     0.8
 }
 
+fn default_ignore_memory_budget() -> bool {
+    false
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PerformanceConfig {
     /// プロセスの仮想メモリ上限を、搭載物理メモリのこの割合に抑える（1.0 = 100%）。0 以下で無効。
     #[serde(default = "default_max_system_memory_fraction")]
     pub max_system_memory_fraction: f64,
+
+    /// メモリ上限（ロード前チェック/RLIMIT_AS）を無視する。
+    /// 使う場合は自己責任（プロセスがOSに kill される可能性があります）。
+    #[serde(default = "default_ignore_memory_budget")]
+    pub ignore_memory_budget: bool,
 }
 
 impl Default for PerformanceConfig {
     fn default() -> Self {
         Self {
             max_system_memory_fraction: default_max_system_memory_fraction(),
+            ignore_memory_budget: default_ignore_memory_budget(),
         }
     }
 }

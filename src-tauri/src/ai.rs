@@ -11,14 +11,16 @@ use tauri::Manager;
 
 /// バンドル済み GGUF 解決のデフォルト候補。
 ///
-/// - まず Gemma 3 1B (q4_0)
-/// - それが無い場合は Gemma 3 270m (q4 系) をフォールバック
+/// - まず Gemma 3 270m (Q6_K)
+/// - 存在しない場合は他の量子化候補へフォールバック
 pub const GEMMA_MODEL_CANDIDATES: &[&str] = &[
-    "gemma-3-1b-it-q4_0.gguf",
-    "gemma-270m-gguf/gemma-3-270m-it-Q4_K_M.gguf",
+    // ユーザー要望: まずこれをデフォルトにする
     "gemma-270m-gguf/gemma-3-270m-it-Q6_K.gguf",
+    "gemma-270m-gguf/gemma-3-270m-it-Q4_K_M.gguf",
     "gemma-270m-gguf/gemma-3-270m-it-Q8_0.gguf",
     "gemma-270m-gguf/gemma-3-270m-it-F16.gguf",
+    // 互換/フォールバック用
+    "gemma-3-1b-it-q4_0.gguf",
 ];
 
 /// バンドル配下のサブディレクトリ（ファイル名だけ指定された場合の探索用）。

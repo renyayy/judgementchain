@@ -901,14 +901,6 @@ pub async fn load_model(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<(), String> {
-    // 既にロード済みならスキップ
-    {
-        let guard = state.candle.lock().map_err(|e| format!("ロックエラー: {}", e))?;
-        if guard.is_some() {
-            return Ok(());
-        }
-    }
-
     let configured_model_path = {
         let config = state
             .config
@@ -919,14 +911,34 @@ pub async fn load_model(
 
     let model_path = crate::ai::resolve_model_path(&app, Some(&configured_model_path))?;
 
-    let mem_frac = {
+    // 既にロード済みでも、モデルパスが違えば再ロードする。
+    {
+        let mut guard = state.candle.lock().map_err(|e| format!("ロックエラー: {}", e))?;
+        if let Some(cur) = guard.as_ref() {
+            if cur.model_path() == model_path.as_path() {
+                return Ok(());
+            }
+        }
+        *guard = None; // メモリ使用量ピークを抑えるため、先に古い状態を破棄
+    }
+
+    let (mem_frac, ignore_memory_budget) = {
         let config = state
             .config
             .read()
             .map_err(|e| format!("Config lock error: {}", e))?;
-        config.performance.max_system_memory_fraction
+        (
+            config.performance.max_system_memory_fraction,
+            config.performance.ignore_memory_budget,
+        )
     };
-    crate::memory_budget::check_model_load_allowed(mem_frac, &model_path)?;
+
+    if ignore_memory_budget {
+        // ignore=true の場合はロード前チェックをスキップし、可能なら RLIMIT_AS も無効化する
+        crate::memory_budget::disable_address_space_limit();
+    } else {
+        crate::memory_budget::check_model_load_allowed(mem_frac, &model_path)?;
+    }
 
     let candle_arc = std::sync::Arc::clone(&state.candle);
 
