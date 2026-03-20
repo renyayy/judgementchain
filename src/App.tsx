@@ -16,6 +16,7 @@ import { useVault } from "./hooks/useVault";
 import { useAppMenu } from "./hooks/useAppMenu";
 import { useGit } from "./hooks/useGit";
 import { useAI } from "./hooks/useAI";
+import { useSettings } from "./hooks/useSettings";
 import { isViewableFile } from "./components/FileViewer";
 import type { EditorTab, MarginAnnotation } from "./types";
 import "./App.css";
@@ -45,6 +46,7 @@ function App() {
   const [vaultPath, setVaultPath] = useState("");
   const [showGemmaTerms, setShowGemmaTerms] = useState(false);
 
+  const { settings, updateSettings } = useSettings();
   const { modelStatus, messages, isGenerating, loadModel, generateText, clearMessages } = useAI();
   const { status: gitStatus, commits: gitCommits, refresh: refreshGit, stage: gitStage, unstage: gitUnstage, discard: gitDiscard, commit: gitCommit, initRepo: gitInit } = useGit();
   const [folderExpandSignal, setFolderExpandSignal] = useState<boolean | null>(null);
@@ -375,6 +377,31 @@ function App() {
 
   const handleOpenNote = useCallback((path: string) => handleSelectFile(path), [handleSelectFile]);
 
+  // ---- settings tab -----------------------------------------------------------
+
+  const openSettingsTab = useCallback(() => {
+    openSpecialTab({
+      path: "settings",
+      tabType: "settings",
+      content: "",
+      savedContent: "",
+      isDirty: false,
+      annotations: [],
+      backlinks: [],
+    }, activePaneIdRef.current);
+  }, [openSpecialTab]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === ",") {
+        e.preventDefault();
+        openSettingsTab();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [openSettingsTab]);
+
   // ---- vault change -----------------------------------------------------------
 
   const resetVault = useCallback(async (dir: string) => {
@@ -453,6 +480,8 @@ function App() {
           <EditorPane
             pane={leftPane}
             isActive={activePaneId === "left"}
+            settings={settings}
+            onUpdateSettings={updateSettings}
             onFocus={() => setActivePaneId("left")}
             onSwitch={(id) => setLeftPane((p) => ({ ...p, activeId: id }))}
             onClose={(id) => closeTabInPane(id, "left")}
@@ -469,6 +498,8 @@ function App() {
               <EditorPane
                 pane={rightPane}
                 isActive={activePaneId === "right"}
+                settings={settings}
+                onUpdateSettings={updateSettings}
                 onFocus={() => setActivePaneId("right")}
                 onSwitch={(id) => setRightPane((p) => ({ ...p, activeId: id }))}
                 onClose={(id) => closeTabInPane(id, "right")}

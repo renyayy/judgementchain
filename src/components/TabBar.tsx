@@ -21,6 +21,7 @@ interface TabBarProps {
 const TAB_ICON: Record<string, string> = {
   diff: "⊟ ",
   commit: "⊙ ",
+  settings: "⚙ ",
   file: "",
 };
 
@@ -47,7 +48,9 @@ export function TabBar({ tabs, activeId, onSwitch, onClose, onSplit, onCloseOthe
   return (
     <div className="tab-bar">
       {tabs.map((tab) => {
-        const name = tab.path.startsWith("commit:")
+        const name = tab.tabType === "settings"
+          ? "Settings"
+          : tab.path.startsWith("commit:")
           ? tab.path.slice(7, 15)
           : (tab.path.split("/").pop() ?? tab.path);
         const isActive = tab.id === activeId;

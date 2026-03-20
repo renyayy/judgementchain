@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { FileViewer, isViewableFile } from "./FileViewer";
 import CodeMirror from "@uiw/react-codemirror";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
@@ -18,31 +18,11 @@ interface EditorProps {
   content: string;
   filePath: string | null;
   isDirty: boolean;
+  fontSize?: number;
+  theme?: "dark" | "light";
   onChange: (value: string) => void;
   onNavigate?: (link: string) => void;
 }
-
-const editorTheme = EditorView.theme({
-  "&": {
-    height: "100%",
-    fontSize: "14px",
-  },
-  ".cm-scroller": {
-    overflow: "auto",
-    fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-    lineHeight: "1.7",
-  },
-  ".cm-content": {
-    padding: "16px 20px",
-    maxWidth: "760px",
-    margin: "0 auto",
-  },
-  ".cm-line": {
-    padding: "0",
-  },
-});
-
-const sharedExtensions = [editorTheme, EditorView.lineWrapping];
 
 function getFileName(path: string) {
   return path.split("/").pop() ?? path;
@@ -56,7 +36,16 @@ function isAdocFile(path: string) {
   return path.toLowerCase().endsWith(".adoc");
 }
 
-export function Editor({ content, filePath, isDirty, onChange, onNavigate }: EditorProps) {
+export function Editor({ content, filePath, isDirty, fontSize = 14, theme = "dark", onChange, onNavigate }: EditorProps) {
+  const editorTheme = useMemo(() => EditorView.theme({
+    "&": { height: "100%", fontSize: `${fontSize}px` },
+    ".cm-scroller": { overflow: "auto", fontFamily: "'JetBrains Mono', 'Fira Code', monospace", lineHeight: "1.7" },
+    ".cm-content": { padding: "16px 20px", maxWidth: "760px", margin: "0 auto" },
+    ".cm-line": { padding: "0" },
+  }), [fontSize]);
+
+  const sharedExtensions = useMemo(() => [editorTheme, EditorView.lineWrapping], [editorTheme]);
+
   const [extensions, setExtensions] = useState<Extension[]>(sharedExtensions);
   const [viewMode, setViewMode] = useState<ViewMode>("edit");
 
@@ -108,7 +97,7 @@ export function Editor({ content, filePath, isDirty, onChange, onNavigate }: Edi
     return () => {
       cancelled = true;
     };
-  }, [filePath, onNavigate]);
+  }, [filePath, onNavigate, sharedExtensions]);
 
   if (!filePath) {
     return (
@@ -175,7 +164,7 @@ export function Editor({ content, filePath, isDirty, onChange, onNavigate }: Edi
             <CodeMirror
               value={content}
               height="100%"
-              theme={oneDark}
+              theme={theme === "light" ? undefined : oneDark}
               extensions={extensions}
               onChange={onChange}
               basicSetup={{
