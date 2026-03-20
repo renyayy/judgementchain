@@ -950,6 +950,7 @@ pub async fn analyze_vault_for_graph(
         )
     };
 
+    eprintln!("[graph] project_id='{}', sa_json.len={}, sa_json.is_empty={}", project_id, sa_json.len(), sa_json.is_empty());
     if sa_json.is_empty() || project_id.is_empty() {
         return Err("Vertex AI設定が不完全です。Graphパネルの⚙設定からサービスアカウントJSONとプロジェクトIDを設定してください。".to_string());
     }
