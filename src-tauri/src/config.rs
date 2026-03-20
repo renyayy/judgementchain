@@ -146,8 +146,34 @@ impl Config {
     }
 
     fn config_file_path() -> Option<PathBuf> {
-        dirs::config_dir().map(|d| d.join("nomos").join("config.toml"))
+        xdg_config_dir().map(|d| d.join("nomos").join("config.toml"))
     }
+}
+
+/// XDG Base Directory Specification に準拠したコンフィグディレクトリを返す。
+/// `$XDG_CONFIG_HOME` が絶対パスで設定されていればそれを使い、
+/// なければプラットフォームデフォルト（Linux: ~/.config, macOS: ~/Library/Application Support）にフォールバックする。
+pub fn xdg_config_dir() -> Option<PathBuf> {
+    if let Ok(val) = std::env::var("XDG_CONFIG_HOME") {
+        let p = PathBuf::from(val);
+        if p.is_absolute() {
+            return Some(p);
+        }
+    }
+    dirs::config_dir()
+}
+
+/// XDG Base Directory Specification に準拠したデータディレクトリを返す。
+/// `$XDG_DATA_HOME` が絶対パスで設定されていればそれを使い、
+/// なければプラットフォームデフォルトにフォールバックする。
+pub fn xdg_data_dir() -> Option<PathBuf> {
+    if let Ok(val) = std::env::var("XDG_DATA_HOME") {
+        let p = PathBuf::from(val);
+        if p.is_absolute() {
+            return Some(p);
+        }
+    }
+    dirs::data_local_dir()
 }
 
 pub fn expand_tilde(path: &str) -> PathBuf {

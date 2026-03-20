@@ -127,7 +127,7 @@ pub async fn get_access_token(service_account_json: &str) -> Result<String, Stri
 pub async fn call_gemini(
     access_token: &str,
     project_id: &str,
-    location: &str,
+    _location: &str,
     model: &str,
     prompt: &str,
 ) -> Result<String, String> {

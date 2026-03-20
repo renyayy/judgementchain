@@ -922,7 +922,8 @@ struct HierarchyChild {
 
 #[derive(Debug, Deserialize)]
 struct HierarchyTop {
-    id: String,
+    #[serde(rename = "id")]
+    _id: String,
     label: String,
     children: Vec<HierarchyChild>,
 }
@@ -1107,7 +1108,7 @@ pub async fn analyze_vault_for_graph(
             child_ids: top.children.iter().map(|c| format!("mid_{}_{}", top_idx, c.id)).collect(),
         });
 
-        for (child_idx, child) in top.children.iter().enumerate() {
+        for (_child_idx, child) in top.children.iter().enumerate() {
             let mid_id = format!("mid_{}_{}", top_idx, child.id);
 
             // 中間グループノード（level=2）

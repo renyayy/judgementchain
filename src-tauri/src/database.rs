@@ -35,7 +35,7 @@ impl Database {
     }
 
     fn db_file_path() -> Result<std::path::PathBuf, String> {
-        dirs::data_local_dir()
+        crate::config::xdg_data_dir()
             .map(|d| d.join("nomos").join("nomos.db"))
             .ok_or_else(|| "Could not determine data directory".to_string())
     }

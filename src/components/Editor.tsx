@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { FileViewer, isViewableFile } from "./FileViewer";
+import { MarkdownCodeEditor } from "./MarkdownCodeEditor";
 import CodeMirror from "@uiw/react-codemirror";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { LanguageDescription } from "@codemirror/language";
@@ -7,12 +8,10 @@ import { languages } from "@codemirror/language-data";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { EditorView } from "@codemirror/view";
 import { Extension } from "@codemirror/state";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import rehypeHighlight from "rehype-highlight";
 import "highlight.js/styles/github-dark.css";
 import { wikilinkPlugin, wikilinkClickHandler } from "../extensions/wikilinks";
 import { wordCompletionExtension } from "../extensions/wordCompletion";
+import { MarkdownPreview } from "./MarkdownPreview";
 
 type ViewMode = "edit" | "split" | "preview";
 
@@ -174,17 +173,49 @@ export function Editor({ content, filePath, isDirty, onChange, onNavigate }: Edi
       <div className={`editor-body editor-body--${viewMode}`}>
         {(viewMode === "edit" || viewMode === "split") && (
           <div className="editor-cm-pane">
-            <Suspense fallback={null}>
+            {isMarkdownFile(filePath) ? (
               <MarkdownCodeEditor value={content} onChange={onChange} onNavigate={onNavigate} />
-            </Suspense>
+            ) : (
+              <CodeMirror
+                value={content}
+                height="100%"
+                theme={oneDark}
+                extensions={extensions}
+                onChange={onChange}
+                basicSetup={{
+                  lineNumbers: true,
+                  highlightActiveLineGutter: true,
+                  highlightSpecialChars: true,
+                  history: true,
+                  foldGutter: false,
+                  drawSelection: true,
+                  dropCursor: true,
+                  allowMultipleSelections: true,
+                  indentOnInput: true,
+                  syntaxHighlighting: true,
+                  bracketMatching: true,
+                  closeBrackets: true,
+                  autocompletion: true,
+                  rectangularSelection: false,
+                  crosshairCursor: false,
+                  highlightActiveLine: true,
+                  highlightSelectionMatches: true,
+                  closeBracketsKeymap: true,
+                  defaultKeymap: true,
+                  searchKeymap: true,
+                  historyKeymap: true,
+                  foldKeymap: false,
+                  completionKeymap: true,
+                  lintKeymap: true,
+                }}
+              />
+            )}
           </div>
         )}
 
-        {(viewMode === "preview" || viewMode === "split") && (
+        {isMarkdownFile(filePath) && (viewMode === "preview" || viewMode === "split") && (
           <div className="preview-pane">
-            <Suspense fallback={null}>
-              <MarkdownPreview content={content} />
-            </Suspense>
+            <MarkdownPreview content={content} />
           </div>
         )}
       </div>
