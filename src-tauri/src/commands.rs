@@ -974,6 +974,10 @@ pub async fn analyze_vault_for_graph(
     for entry in walkdir::WalkDir::new(&expanded_dir)
         .follow_links(false)
         .into_iter()
+        .filter_entry(|e| {
+            // 隠しディレクトリ(.git, .obsidian等)をスキップ
+            e.file_name().to_str().map_or(true, |name| !name.starts_with('.'))
+        })
         .filter_map(|e| e.ok())
     {
         if entry.file_type().is_file() {
