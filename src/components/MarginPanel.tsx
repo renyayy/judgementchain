@@ -14,7 +14,7 @@ const ICON_MAP: Record<string, string> = {
   contradiction: "⚡",
   self_contradiction: "🔄",
   paper: "📄",
-  summary: "📝",
+  summary: "📊",
   link: "🔗",
 };
 
@@ -32,8 +32,10 @@ export function MarginPanel({ annotations, backlinks, onOpenNote, onRefreshAnnot
     try {
       await invoke<string>("generate_weekly_summary");
       onRefreshAnnotations?.();
-    } catch {
-      // モデル未ロードや活動なしの場合は静かに失敗
+    } catch (error) {
+      // モデル未ロードや活動なしの場合は静かに失敗させるが、
+      // それ以外の想定外エラーはログに出してデバッグ可能性を確保する
+      console.error("Failed to generate weekly summary", error);
     } finally {
       setGeneratingSummary(false);
     }
