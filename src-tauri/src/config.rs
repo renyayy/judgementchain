@@ -13,8 +13,8 @@ fn default_graph_backend() -> String {
     "vertex_ai".to_string()
 }
 
-fn default_max_top_clusters() -> usize {
-    2
+fn default_graph_similarity_threshold() -> f32 {
+    0.3
 }
 
 fn default_max_system_memory_fraction() -> f64 {
@@ -68,8 +68,8 @@ pub struct AiConfig {
     pub vertex_ai_model: String,
     #[serde(default = "default_graph_backend")]
     pub graph_backend: String,
-    #[serde(default = "default_max_top_clusters")]
-    pub max_top_clusters: usize,
+    #[serde(default = "default_graph_similarity_threshold")]
+    pub graph_similarity_threshold: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -104,7 +104,7 @@ impl Default for Config {
                 vertex_ai_location: default_vertex_location(),
                 vertex_ai_model: default_vertex_model(),
                 graph_backend: default_graph_backend(),
-                max_top_clusters: default_max_top_clusters(),
+                graph_similarity_threshold: default_graph_similarity_threshold(),
             },
             git: GitConfig {
                 enabled: false,

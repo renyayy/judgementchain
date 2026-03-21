@@ -319,6 +319,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "boxcar"
+version = "0.2.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36f64beae40a84da1b4b26ff2761a5b895c12adc41dc25aaee1c4f2bbfe97a6e"
+
+[[package]]
 name = "brotli"
 version = "8.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1365,6 +1371,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "fa-leiden-cd"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "35a1b327fbf0e2862c7db3b226a434e67b3d1fecc43eb55987d0944e32765fb3"
+dependencies = [
+ "boxcar",
+ "hashbrown 0.15.5",
+ "rayon",
+ "serde",
+]
+
+[[package]]
 name = "fallible-iterator"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2271,7 +2289,10 @@ version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
 dependencies = [
+ "allocator-api2",
+ "equivalent",
  "foldhash 0.1.5",
+ "serde",
 ]
 
 [[package]]
@@ -2867,6 +2888,7 @@ dependencies = [
  "chrono",
  "dirs 5.0.1",
  "encoding_rs",
+ "fa-leiden-cd",
  "hex",
  "hf-hub",
  "jsonwebtoken",

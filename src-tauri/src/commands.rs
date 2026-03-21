@@ -915,7 +915,7 @@ pub async fn analyze_vault_for_graph(
 ) -> Result<GraphData, String> {
     use crate::graph_backend::{GraphBackend, ClaudeCliBackend, VertexAiBackend};
 
-    let (graph_backend_name, sa_json, project_id, location, model, max_top_clusters) = {
+    let (graph_backend_name, sa_json, project_id, location, model, similarity_threshold) = {
         let config = state.config.read().map_err(|e| format!("Config lock error: {}", e))?;
         (
             config.ai.graph_backend.clone(),
@@ -923,7 +923,7 @@ pub async fn analyze_vault_for_graph(
             config.ai.vertex_ai_project_id.clone(),
             config.ai.vertex_ai_location.clone(),
             config.ai.vertex_ai_model.clone(),
-            config.ai.max_top_clusters,
+            config.ai.graph_similarity_threshold,
         )
     };
 
@@ -1020,7 +1020,7 @@ pub async fn analyze_vault_for_graph(
     eprintln!("[graph] {} 件のファイルでクラスタリング実行", file_embeddings.len());
 
     // 5. 再帰的クラスタリング
-    let mut tree = crate::clustering::build_cluster_tree(&file_embeddings, max_top_clusters);
+    let mut tree = crate::clustering::build_cluster_tree(&file_embeddings, similarity_threshold);
 
     // 6. LLMでラベル付け（GraphBackend経由）
     let backend: Option<Box<dyn GraphBackend>> = match graph_backend_name.as_str() {
@@ -1158,17 +1158,26 @@ fn cluster_tree_to_graph_data(tree: &crate::clustering::ClusterTree) -> GraphDat
         }
     }
 
-    // 同一レベルのノード間で類似エッジを生成（ファイルレベルは閾値を高くする）
-    for (level_idx, level) in tree.levels.iter().enumerate() {
+    // 同一レベルのノード間で類似エッジを生成（閾値0.85、各ノード上位3本のみ）
+    let edge_similarity_threshold = 0.85f32;
+    let max_edges_per_node = 3usize;
+    for level in &tree.levels {
         if level.len() < 2 { continue; }
-        // ファイルレベル(0)はペア数が多いため閾値を高く設定
-        let similarity_threshold = if level_idx == 0 { 0.7f32 } else { 0.5f32 };
-        // ファイルレベルで100件以上はエッジ生成をスキップ（O(n²)回避）
-        if level_idx == 0 && level.len() > 100 { continue; }
+        // 各ノードの上位k本のエッジを収集
         for i in 0..level.len() {
-            for j in (i + 1)..level.len() {
+            let mut candidates: Vec<(usize, f32)> = Vec::new();
+            for j in 0..level.len() {
+                if i == j { continue; }
                 let sim = crate::clustering::cosine_similarity(&level[i].centroid, &level[j].centroid);
-                if sim >= similarity_threshold {
+                if sim >= edge_similarity_threshold {
+                    candidates.push((j, sim));
+                }
+            }
+            candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            candidates.truncate(max_edges_per_node);
+            for (j, sim) in candidates {
+                // 重複防止: i < j のペアのみ追加
+                if i < j {
                     edges.push(GraphEdgeData {
                         id: format!("e{}", edge_counter),
                         source: level[i].id.clone(),

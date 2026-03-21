@@ -47,6 +47,7 @@ libc = "0.2"
 portable-pty = "0.8"
 async-trait = "0.1"
 rand = "0.8"
+fa-leiden-cd = "0.1"
 
 [features]
 default = []

@@ -158,8 +158,8 @@ export default function GraphPanel({ vaultPath, onOpenFile }: GraphPanelProps) {
         {
           selector: 'node[type="file"]',
           style: {
-            width: 14,
-            height: 14,
+            width: 6,
+            height: 6,
             "background-color": "var(--fg-muted, #8b949e)",
             "border-width": 0,
             label: "",
@@ -208,7 +208,7 @@ export default function GraphPanel({ vaultPath, onOpenFile }: GraphPanelProps) {
         {
           selector: 'edge[edge_type="similarity"]',
           style: {
-            width: "mapData(weight, 0.5, 1, 1, 4)" as unknown as number,
+            width: "mapData(weight, 0.5, 1, 0.3, 1.5)" as unknown as number,
             "line-color": "var(--accent, #58a6ff)",
             "target-arrow-shape": "none" as const,
             "curve-style": "bezier" as const,
