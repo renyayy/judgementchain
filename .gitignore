@@ -1,0 +1,37 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Gemma model file (large binary, not committed)
+src-tauri/models/*.gguf
+src-tauri/models/gemma-3-270m-it
+
+# Release files
+src-tauri/target/release/bundle/
+judgement-brain.app.zip
+judgement-brain_{{version}}_aarch64.dmg
+
+.env
+.env.*
+mise.prod.toml

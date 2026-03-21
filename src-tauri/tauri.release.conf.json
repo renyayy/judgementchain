@@ -1,0 +1,11 @@
+{
+  "bundle": {
+    "resources": [
+      "models/gemma-3-1b-it-q4_0.gguf",
+      "models/gemma-270m-gguf/gemma-3-270m-it-Q4_K_M.gguf",
+      "models/gemma-270m-gguf/gemma-3-270m-it-Q6_K.gguf",
+      "models/gemma-270m-gguf/gemma-3-270m-it-Q8_0.gguf",
+      "models/gemma-270m-gguf/gemma-3-270m-it-F16.gguf"
+    ]
+  }
+}

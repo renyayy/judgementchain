@@ -1,0 +1,9 @@
+{
+  "id": "word-counter",
+  "name": "Word Counter",
+  "version": "0.1.0",
+  "description": "Shows word count in the status bar",
+  "main": "main.js",
+  "capabilities": ["status-bar"]
+}
+
