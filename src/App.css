@@ -1984,11 +1984,24 @@ body.resizing * {
 
 .graph-floor-selector {
   display: flex;
+  align-items: center;
   gap: 2px;
   padding: 4px 10px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-tertiary);
   flex-shrink: 0;
+}
+
+.graph-mode-selector {
+  display: flex;
+  gap: 2px;
+}
+
+.graph-floor-separator {
+  color: var(--fg-muted);
+  font-size: 10px;
+  margin: 0 4px;
+  opacity: 0.5;
 }
 
 .graph-floor-btn {

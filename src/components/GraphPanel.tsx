@@ -16,11 +16,24 @@ function getTotalLevels(graphData: GraphData): number {
   return Math.max(...graphData.nodes.map(n => n.level), 1);
 }
 
-function filterGraphByFloor(graphData: GraphData, floor: number): GraphData {
-  // 選択したフロアのノード + 親レベルのノードを表示
-  const nodes = graphData.nodes.filter(n => n.level === floor || n.level === floor + 1);
+function filterByMode(
+  graphData: GraphData,
+  mode: "hierarchy" | "graph",
+  floor: number | null,
+): GraphData {
+  if (mode === "hierarchy") {
+    return {
+      nodes: graphData.nodes,
+      edges: graphData.edges.filter(e => e.edge_type === "hierarchy"),
+    };
+  }
+  // グラフモード: 選択フロアのノードのみ + similarityエッジのみ
+  if (floor === null) return { nodes: [], edges: [] };
+  const nodes = graphData.nodes.filter(n => n.level === floor);
   const nodeIds = new Set(nodes.map(n => n.id));
-  const edges = graphData.edges.filter(e => nodeIds.has(e.source) && nodeIds.has(e.target));
+  const edges = graphData.edges.filter(e =>
+    e.edge_type === "similarity" && nodeIds.has(e.source) && nodeIds.has(e.target)
+  );
   return { nodes, edges };
 }
 
@@ -49,7 +62,8 @@ export default function GraphPanel({ vaultPath, onOpenFile }: GraphPanelProps) {
   const cyInstance = useRef<cytoscape.Core | null>(null);
   const [tooltip, setTooltip] = useState<TooltipState>({ visible: false, text: "", x: 0, y: 0 });
 
-  // フロア選択
+  // 表示モード・フロア選択
+  const [viewMode, setViewMode] = useState<"hierarchy" | "graph">("hierarchy");
   const [selectedFloor, setSelectedFloor] = useState<number | null>(null);
   const [totalLevels, setTotalLevels] = useState(0);
 
@@ -131,6 +145,8 @@ export default function GraphPanel({ vaultPath, onOpenFile }: GraphPanelProps) {
           id: edge.id,
           source: edge.source,
           target: edge.target,
+          edge_type: edge.edge_type,
+          weight: edge.weight ?? 0,
         },
       })),
     ];
@@ -180,13 +196,23 @@ export default function GraphPanel({ vaultPath, onOpenFile }: GraphPanelProps) {
           };
         }),
         {
-          selector: "edge",
+          selector: 'edge[edge_type="hierarchy"]',
           style: {
             width: 1,
             "line-color": "var(--border, #30363d)",
             "target-arrow-shape": "none",
             "curve-style": "bezier",
             opacity: 0.7,
+          },
+        },
+        {
+          selector: 'edge[edge_type="similarity"]',
+          style: {
+            width: "mapData(weight, 0.5, 1, 1, 4)" as unknown as number,
+            "line-color": "var(--accent, #58a6ff)",
+            "target-arrow-shape": "none" as const,
+            "curve-style": "bezier" as const,
+            opacity: "mapData(weight, 0.5, 1, 0.3, 0.8)" as unknown as number,
           },
         },
         {
@@ -197,13 +223,19 @@ export default function GraphPanel({ vaultPath, onOpenFile }: GraphPanelProps) {
           },
         },
       ],
-      layout: {
+      layout: (viewMode === "graph" ? {
+        name: "cose",
+        padding: 30,
+        nodeRepulsion: () => 8000,
+        idealEdgeLength: () => 80,
+        animate: false,
+      } : {
         name: "dagre",
         rankDir: "BT",
         nodeSep: 20,
         rankSep: 60,
         padding: 20,
-      } as cytoscape.LayoutOptions,
+      }) as cytoscape.LayoutOptions,
       userZoomingEnabled: true,
       userPanningEnabled: true,
       minZoom: 0.2,
@@ -244,13 +276,13 @@ export default function GraphPanel({ vaultPath, onOpenFile }: GraphPanelProps) {
     });
 
     cyInstance.current = cy;
-  }, [onOpenFile]);
+  }, [onOpenFile, viewMode]);
 
   useEffect(() => {
     if (status === "done" && data) {
       const levels = getTotalLevels(data);
       setTotalLevels(levels);
-      const filtered = selectedFloor !== null ? filterGraphByFloor(data, selectedFloor) : data;
+      const filtered = filterByMode(data, viewMode, selectedFloor);
       buildGraph(filtered);
     }
     return () => {
@@ -259,7 +291,7 @@ export default function GraphPanel({ vaultPath, onOpenFile }: GraphPanelProps) {
         cyInstance.current = null;
       }
     };
-  }, [status, data, selectedFloor, buildGraph]);
+  }, [status, data, viewMode, selectedFloor, buildGraph]);
 
   useEffect(() => {
     return () => {
@@ -383,21 +415,34 @@ export default function GraphPanel({ vaultPath, onOpenFile }: GraphPanelProps) {
 
         {status === "done" && totalLevels > 1 && (
           <div className="graph-floor-selector">
-            {Array.from({ length: totalLevels }, (_, i) => i + 1).map(floor => (
+            <div className="graph-mode-selector">
               <button
-                key={floor}
-                className={`graph-floor-btn ${selectedFloor === floor ? "active" : ""}`}
-                onClick={() => setSelectedFloor(floor)}
+                className={`graph-floor-btn ${viewMode === "hierarchy" ? "active" : ""}`}
+                onClick={() => { setViewMode("hierarchy"); setSelectedFloor(null); }}
               >
-                F{floor}
+                階層
               </button>
-            ))}
-            <button
-              className={`graph-floor-btn ${selectedFloor === null ? "active" : ""}`}
-              onClick={() => setSelectedFloor(null)}
-            >
-              全体
-            </button>
+              <button
+                className={`graph-floor-btn ${viewMode === "graph" ? "active" : ""}`}
+                onClick={() => { setViewMode("graph"); if (selectedFloor === null) setSelectedFloor(1); }}
+              >
+                グラフ
+              </button>
+            </div>
+            {viewMode === "graph" && (
+              <>
+                <span className="graph-floor-separator">|</span>
+                {Array.from({ length: totalLevels }, (_, i) => i + 1).map(floor => (
+                  <button
+                    key={floor}
+                    className={`graph-floor-btn ${selectedFloor === floor ? "active" : ""}`}
+                    onClick={() => setSelectedFloor(floor)}
+                  >
+                    F{floor}
+                  </button>
+                ))}
+              </>
+            )}
           </div>
         )}
 

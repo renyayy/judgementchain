@@ -72,6 +72,8 @@ export interface GraphEdge {
   id: string;
   source: string;
   target: string;
+  edge_type: string;
+  weight: number | null;
 }
 
 export interface GraphData {

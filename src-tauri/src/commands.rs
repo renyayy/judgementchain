@@ -890,6 +890,8 @@ pub struct GraphEdgeData {
     pub id: String,
     pub source: String,
     pub target: String,
+    pub edge_type: String,
+    pub weight: Option<f32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1142,21 +1144,45 @@ fn cluster_tree_to_graph_data(tree: &crate::clustering::ClusterTree) -> GraphDat
                 child_ids: node.child_ids.clone(),
             });
 
-            // 子→親エッジ
+            // 子→親エッジ（階層エッジ）
             if let Some(parent_id) = &node.parent_id {
                 edges.push(GraphEdgeData {
                     id: format!("e{}", edge_counter),
                     source: node.id.clone(),
                     target: parent_id.clone(),
+                    edge_type: "hierarchy".to_string(),
+                    weight: None,
                 });
                 edge_counter += 1;
             }
         }
     }
 
+    // 同一レベルのノード間で類似エッジを生成
+    let similarity_threshold = 0.5f32;
+    for level in &tree.levels {
+        if level.len() < 2 { continue; }
+        for i in 0..level.len() {
+            for j in (i + 1)..level.len() {
+                let sim = crate::clustering::cosine_similarity(&level[i].centroid, &level[j].centroid);
+                if sim >= similarity_threshold {
+                    let level_idx = tree.levels.iter().position(|l| std::ptr::eq(l, level)).unwrap_or(0);
+                    let graph_level = (level_idx + 1) as u32;
+                    edges.push(GraphEdgeData {
+                        id: format!("e{}", edge_counter),
+                        source: level[i].id.clone(),
+                        target: level[j].id.clone(),
+                        edge_type: "similarity".to_string(),
+                        weight: Some(sim),
+                    });
+                    let _ = graph_level; // level情報はエッジのsource/targetのノードから取得可能
+                    edge_counter += 1;
+                }
+            }
+        }
+    }
+
     // total_levels をノードに含める（フロントエンドでフロア選択に使用）
-    // GraphDataにtotal_levelsフィールドを追加する代わりに、
-    // 最上位グループノードのkeywordsに階数情報を埋め込む（後方互換）
     if let Some(top_level) = tree.levels.last() {
         if let Some(top_node) = top_level.first() {
             if let Some(graph_node) = nodes.iter_mut().find(|n| n.id == top_node.id) {
