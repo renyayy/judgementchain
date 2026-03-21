@@ -23,9 +23,8 @@ dist-ssr
 *.sln
 *.sw?
 
-# Gemma model file (large binary, not committed)
-src-tauri/models/*.gguf
-src-tauri/models/gemma-3-270m-it
+# Model files (large binaries, not committed)
+src-tauri/models/
 
 # Release files
 src-tauri/target/release/bundle/
