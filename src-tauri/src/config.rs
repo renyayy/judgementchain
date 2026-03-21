@@ -13,17 +13,27 @@ fn default_max_system_memory_fraction() -> f64 {
     0.8
 }
 
+fn default_ignore_memory_budget() -> bool {
+    false
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PerformanceConfig {
     /// プロセスの仮想メモリ上限を、搭載物理メモリのこの割合に抑える（1.0 = 100%）。0 以下で無効。
     #[serde(default = "default_max_system_memory_fraction")]
     pub max_system_memory_fraction: f64,
+
+    /// メモリ上限（ロード前チェック/RLIMIT_AS）を無視する。
+    /// 使う場合は自己責任（プロセスがOSに kill される可能性があります）。
+    #[serde(default = "default_ignore_memory_budget")]
+    pub ignore_memory_budget: bool,
 }
 
 impl Default for PerformanceConfig {
     fn default() -> Self {
         Self {
             max_system_memory_fraction: default_max_system_memory_fraction(),
+            ignore_memory_budget: default_ignore_memory_budget(),
         }
     }
 }
@@ -42,6 +52,8 @@ pub struct Config {
 pub struct VaultConfig {
     pub path: String,
     pub auto_save_interval_ms: u64,
+    #[serde(default)]
+    pub plugins_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -81,6 +93,7 @@ impl Default for Config {
             vault: VaultConfig {
                 path: "~/Documents/nomos-vault".to_string(),
                 auto_save_interval_ms: 2000,
+                plugins_path: None,
             },
             ai: AiConfig {
                 backend: "ollama".to_string(),
@@ -158,6 +171,15 @@ impl Config {
 
     pub fn get_vault_path(&self) -> PathBuf {
         expand_tilde(&self.vault.path)
+    }
+
+    pub fn get_plugins_path(&self) -> PathBuf {
+        match &self.vault.plugins_path {
+            Some(p) if !p.is_empty() => expand_tilde(p),
+            _ => dirs::home_dir()
+                .map(|h| h.join(".config").join("nomos").join("plugins"))
+                .unwrap_or_else(|| self.get_vault_path().join(".nomos").join("plugins")),
+        }
     }
 
     fn config_file_path() -> Option<PathBuf> {

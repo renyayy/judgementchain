@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import { FileViewer, isViewableFile } from "./FileViewer";
 import CodeMirror from "@uiw/react-codemirror";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
@@ -11,6 +11,7 @@ import { nomosDark, nomosLight } from "../lib/editorThemes";
 import { wikilinkPlugin, wikilinkClickHandler } from "../extensions/wikilinks";
 import { wordCompletionExtension } from "../extensions/wordCompletion";
 import { MarkdownPreview } from "./MarkdownPreview";
+import { usePluginRegistry } from "../plugins/registry";
 
 type ViewMode = "edit" | "split" | "preview";
 
@@ -50,6 +51,9 @@ export function Editor({ content, filePath, isDirty, fontSize = 14, theme = "dar
 
   const [extensions, setExtensions] = useState<Extension[]>(sharedExtensions);
   const [viewMode, setViewMode] = useState<ViewMode>("edit");
+  const { editorExtensions, emit } = usePluginRegistry();
+
+  const emitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!filePath || !isMarkdownFile(filePath)) {
@@ -73,7 +77,7 @@ export function Editor({ content, filePath, isDirty, fontSize = 14, theme = "dar
           wikilinkPlugin,
           ...(onNavigate ? [wikilinkClickHandler(onNavigate)] : []),
         ];
-        if (!cancelled) setExtensions(markdownExtensions);
+        if (!cancelled) setExtensions([...markdownExtensions, ...editorExtensions]);
         return;
       }
 
@@ -87,7 +91,7 @@ export function Editor({ content, filePath, isDirty, fontSize = 14, theme = "dar
       try {
         const loaded = description ? await description.load() : null;
         const languageExtensions: Extension[] = loaded ? [...baseExtensions, loaded] : baseExtensions;
-        if (!cancelled) setExtensions(languageExtensions);
+        if (!cancelled) setExtensions([...languageExtensions, ...editorExtensions]);
       } catch {
         // `@codemirror/lang-*` が未導入の場合などでも、エディタが壊れないようフォールバックする
         if (!cancelled) setExtensions(baseExtensions);
@@ -99,7 +103,7 @@ export function Editor({ content, filePath, isDirty, fontSize = 14, theme = "dar
     return () => {
       cancelled = true;
     };
-  }, [filePath, onNavigate, sharedExtensions]);
+  }, [filePath, onNavigate, editorExtensions]);
 
   if (!filePath) {
     return (
@@ -168,7 +172,13 @@ export function Editor({ content, filePath, isDirty, fontSize = 14, theme = "dar
               height="100%"
               theme={theme === "light" ? nomosLight : nomosDark}
               extensions={extensions}
-              onChange={onChange}
+              onChange={(v) => {
+                if (emitTimerRef.current) clearTimeout(emitTimerRef.current);
+                emitTimerRef.current = setTimeout(() => {
+                  emit("editor-change", filePath, v);
+                }, 100);
+                onChange(v);
+              }}
               basicSetup={{
                 lineNumbers: true,
                 highlightActiveLineGutter: true,
