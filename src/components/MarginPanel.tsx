@@ -1,25 +1,43 @@
 import { useState, useRef } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import type { MarginAnnotation, Backlink } from "../types";
 
 interface MarginPanelProps {
   annotations: MarginAnnotation[];
   backlinks: Backlink[];
   onOpenNote: (path: string) => void;
+  onRefreshAnnotations?: () => void;
 }
 
 const ICON_MAP: Record<string, string> = {
   related_note: "💡",
   contradiction: "⚡",
+  self_contradiction: "🔄",
   paper: "📄",
   summary: "📝",
   link: "🔗",
 };
 
-export function MarginPanel({ annotations, backlinks, onOpenNote }: MarginPanelProps) {
+export function MarginPanel({ annotations, backlinks, onOpenNote, onRefreshAnnotations }: MarginPanelProps) {
   const [width, setWidth] = useState(260);
+  const [generatingSummary, setGeneratingSummary] = useState(false);
   const isDragging = useRef(false);
   const startX = useRef(0);
   const startWidth = useRef(0);
+
+  const hasSummary = annotations.some((a) => a.annotation_type === "summary");
+
+  const handleGenerateSummary = async () => {
+    setGeneratingSummary(true);
+    try {
+      await invoke<string>("generate_weekly_summary");
+      onRefreshAnnotations?.();
+    } catch {
+      // モデル未ロードや活動なしの場合は静かに失敗
+    } finally {
+      setGeneratingSummary(false);
+    }
+  };
 
   const handleResizeStart = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -75,6 +93,16 @@ export function MarginPanel({ annotations, backlinks, onOpenNote }: MarginPanelP
               </div>
             ))}
           </div>
+        )}
+
+        {!hasSummary && (
+          <button
+            className="margin-generate-summary-btn"
+            onClick={handleGenerateSummary}
+            disabled={generatingSummary}
+          >
+            {generatingSummary ? "生成中..." : "📊 週次サマリを生成"}
+          </button>
         )}
       </div>
 

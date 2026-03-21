@@ -284,6 +284,23 @@ pub fn build_weekly_summary_prompt(week_label: &str, activity: &[(String, u32)])
 
 // ─── 矛盾検出 ─────────────────────────────────────────────────────────────────
 
+/// 同一ノートの過去バージョンとの矛盾検出用プロンプト（Gemma instruct フォーマット）。
+pub fn build_self_contradiction_prompt(current: &str, past: &str, time_ago: &str) -> String {
+    let cur = current.chars().take(500).collect::<String>();
+    let pst = past.chars().take(500).collect::<String>();
+    format!(
+        "<start_of_turn>user\n\
+         以下は同じノートの2つのバージョンです。\n\n\
+         【現在の記述】\n{cur}\n\n\
+         【{time_ago}の記述】\n{pst}\n\n\
+         現在の記述は過去の記述と矛盾していますか？\
+         主張や立場が変わっている場合のみ「矛盾」とみなしてください。\
+         単なる加筆・補足は矛盾ではありません。\n\
+         「はい、矛盾があります：[理由を1文で]」または「いいえ、矛盾はありません」のどちらかで答えてください。\
+         <end_of_turn>\n<start_of_turn>model\n"
+    )
+}
+
 /// 矛盾検出用のプロンプトを構築する（Gemma instruct フォーマット）。
 pub fn build_contradiction_prompt(current: &str, other: &str) -> String {
     // 長いノートはトークン節約のため先頭 500 字に切り詰める

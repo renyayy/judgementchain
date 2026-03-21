@@ -87,6 +87,33 @@ function App() {
     refreshGit();
   }, [listFiles]);
 
+  // ---- auto-generate weekly summary when model is ready --------------------
+
+  useEffect(() => {
+    if (modelStatus !== "ready") return;
+    invoke<string | null>("get_weekly_summary").then((summary) => {
+      if (summary !== null) return;
+      invoke<string>("generate_weekly_summary")
+        .then(() => {
+          // サマリー生成後、アクティブタブのアノテーションを更新
+          const pane = activePaneId === "left" ? leftPane : rightPane;
+          const tab = pane.tabs.find((t) => t.id === pane.activeId);
+          if (tab?.tabType === "file") {
+            getMarginAnnotations(tab.path).then((annots) => {
+              const setPaneLocal = activePaneId === "left" ? setLeftPane : setRightPane;
+              setPaneLocal((cur) => ({
+                ...cur,
+                tabs: cur.tabs.map((t) =>
+                  t.id === tab.id ? { ...t, annotations: annots } : t
+                ),
+              }));
+            });
+          }
+        })
+        .catch(() => {});
+    }).catch(() => {});
+  }, [modelStatus]);
+
   useEffect(() => {
     const u = listen("vault:changed", () => { listFiles(); refreshGit(); });
     return () => { u.then((f) => f()); };
@@ -269,7 +296,7 @@ function App() {
               setPaneLocal((cur) => ({
                 ...cur,
                 tabs: cur.tabs.map((t) =>
-                  t.id === tab.id ? { ...t, annotations: [...t.annotations.filter((a) => a.annotation_type !== "contradiction"), ...cs] } : t
+                  t.id === tab.id ? { ...t, annotations: [...t.annotations.filter((a) => a.annotation_type !== "contradiction" && a.annotation_type !== "self_contradiction"), ...cs] } : t
                 ),
               }));
             }
@@ -550,6 +577,21 @@ function App() {
             annotations={activeTab?.annotations ?? []}
             backlinks={activeTab?.backlinks ?? []}
             onOpenNote={handleOpenNote}
+            onRefreshAnnotations={() => {
+              const pane = activePaneId === "left" ? leftPane : rightPane;
+              const tab = pane.tabs.find((t) => t.id === pane.activeId);
+              if (tab?.tabType === "file") {
+                getMarginAnnotations(tab.path).then((annots) => {
+                  const setPaneLocal = activePaneId === "left" ? setLeftPane : setRightPane;
+                  setPaneLocal((cur) => ({
+                    ...cur,
+                    tabs: cur.tabs.map((t) =>
+                      t.id === tab.id ? { ...t, annotations: annots } : t
+                    ),
+                  }));
+                });
+              }
+            }}
           />
         )}
         </div>{/* app-body-main */}

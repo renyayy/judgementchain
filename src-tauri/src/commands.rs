@@ -394,19 +394,31 @@ pub async fn get_margin_annotations(path: String, state: State<'_, AppState>) ->
     // 2) キャッシュ済み矛盾（TTL 1時間）
     let contradictions = state.db.get_contradictions(&path)?;
     for (i, (conflicting_path, description)) in contradictions.into_iter().enumerate() {
-        let name = std::path::Path::new(&conflicting_path)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("Unknown")
-            .to_string();
-        annotations.push(MarginAnnotation {
-            id: format!("contradiction_{}", i),
-            annotation_type: "contradiction".to_string(),
-            icon: "⚡".to_string(),
-            title: name,
-            content: description,
-            link: Some(conflicting_path),
-        });
+        if conflicting_path.starts_with("self@") {
+            // 自己矛盾（git 履歴ベース）
+            annotations.push(MarginAnnotation {
+                id: format!("self_contradiction_{}", i),
+                annotation_type: "self_contradiction".to_string(),
+                icon: "🔄".to_string(),
+                title: "過去の自分と矛盾".to_string(),
+                content: description,
+                link: None,
+            });
+        } else {
+            let name = std::path::Path::new(&conflicting_path)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("Unknown")
+                .to_string();
+            annotations.push(MarginAnnotation {
+                id: format!("contradiction_{}", i),
+                annotation_type: "contradiction".to_string(),
+                icon: "⚡".to_string(),
+                title: name,
+                content: description,
+                link: Some(conflicting_path),
+            });
+        }
     }
 
     // 3) 論文リンク（BibTeX + keyword 類似度）
@@ -465,6 +477,23 @@ fn current_week_start() -> i64 {
         .single()
         .map(|d| d.timestamp())
         .unwrap_or(0)
+}
+
+/// UNIX タイムスタンプを「◯日前」「◯週間前」等の相対表現に変換する。
+fn format_time_ago(timestamp: i64) -> String {
+    let now = chrono::Utc::now().timestamp();
+    let diff = now - timestamp;
+    if diff < 3600 {
+        "1時間未満".to_string()
+    } else if diff < 86400 {
+        format!("{}時間", diff / 3600)
+    } else if diff < 604800 {
+        format!("{}日", diff / 86400)
+    } else if diff < 2592000 {
+        format!("{}週間", diff / 604800)
+    } else {
+        format!("{}ヶ月", diff / 2592000)
+    }
 }
 
 /// 今週のサマリをキャッシュから返す。なければ None。
@@ -528,15 +557,57 @@ pub async fn detect_contradictions(
     // 既存キャッシュを無効化（再チェック）
     state.db.clear_contradictions(&path)?;
 
-    // 類似ノートを取得（top 3）
-    let embedding = state.db.get_embedding(&path)?.unwrap_or_default();
-    let similar = state.db.find_similar(&embedding, 3, &path)?;
-    if similar.is_empty() {
-        return Ok(vec![]);
+    let mut results: Vec<MarginAnnotation> = vec![];
+
+    // ── 1) 自己矛盾検出（git 履歴 vs 現在） ──
+    let vault_path = {
+        let config = state.config.read().map_err(|e| format!("Config lock error: {}", e))?;
+        config.get_vault_path()
+    };
+
+    let vault_path_str = vault_path.to_string_lossy();
+    let history = crate::git::get_file_history(&vault_path_str, &path, 3);
+    for (commit_hash, timestamp) in &history {
+        let past_content = match crate::git::get_file_at_commit(&vault_path_str, &path, commit_hash) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        // 内容が同じならスキップ
+        if past_content.trim() == current_content.trim() {
+            continue;
+        }
+
+        let time_ago = format_time_ago(*timestamp);
+        let prompt = crate::ai::build_self_contradiction_prompt(&current_content, &past_content, &time_ago);
+        let candle_arc = std::sync::Arc::clone(&state.candle);
+
+        let response = tokio::task::spawn_blocking(move || {
+            let mut guard = candle_arc.lock().map_err(|e| format!("Lock error: {}", e))?;
+            let candle_state = guard.as_mut().ok_or("モデル未ロード")?;
+            candle_state.generate(&prompt, 128, |_| {})
+        })
+        .await
+        .map_err(|e| format!("Task error: {}", e))??;
+
+        if let Some(description) = crate::ai::parse_contradiction_response(&response) {
+            let cache_key = format!("self@{}", &commit_hash[..7.min(commit_hash.len())]);
+            let _ = state.db.store_contradiction(&path, &cache_key, &description);
+
+            results.push(MarginAnnotation {
+                id: format!("self_contradiction_{}", results.len()),
+                annotation_type: "self_contradiction".to_string(),
+                icon: "🔄".to_string(),
+                title: format!("{}前の自分と矛盾", time_ago),
+                content: description,
+                link: None,
+            });
+        }
     }
 
-    // 各類似ノートと矛盾チェック
-    let mut results: Vec<MarginAnnotation> = vec![];
+    // ── 2) 他ノートとの矛盾検出（既存ロジック） ──
+    let embedding = state.db.get_embedding(&path)?.unwrap_or_default();
+    let similar = state.db.find_similar(&embedding, 3, &path)?;
 
     for (similar_path, _) in similar {
         let other_content = match std::fs::read_to_string(&similar_path) {
@@ -547,7 +618,6 @@ pub async fn detect_contradictions(
         let prompt = crate::ai::build_contradiction_prompt(&current_content, &other_content);
         let candle_arc = std::sync::Arc::clone(&state.candle);
 
-        // Candle 推論（spawn_blocking でノンブロッキング）
         let response = tokio::task::spawn_blocking(move || {
             let mut guard = candle_arc.lock().map_err(|e| format!("Lock error: {}", e))?;
             let candle_state = guard.as_mut().ok_or("モデル未ロード")?;
@@ -557,7 +627,6 @@ pub async fn detect_contradictions(
         .map_err(|e| format!("Task error: {}", e))??;
 
         if let Some(description) = crate::ai::parse_contradiction_response(&response) {
-            // キャッシュに保存
             let _ = state.db.store_contradiction(&path, &similar_path, &description);
 
             let name = std::path::Path::new(&similar_path)

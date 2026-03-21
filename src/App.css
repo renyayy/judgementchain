@@ -1181,6 +1181,35 @@ body.resizing * {
   background: color-mix(in srgb, var(--bg-hover) 85%, #f78166 15%);
   border-color: #f78166;
 }
+.margin-card--self_contradiction {
+  border-left: 3px solid #f0883e;
+  background: color-mix(in srgb, var(--bg-tertiary) 90%, #f0883e 10%);
+}
+.margin-card--self_contradiction:hover {
+  background: color-mix(in srgb, var(--bg-hover) 85%, #f0883e 15%);
+  border-color: #f0883e;
+}
+
+.margin-generate-summary-btn {
+  width: 100%;
+  padding: 6px 10px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.margin-generate-summary-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.margin-generate-summary-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
 
 /* Backlinks */
 .backlinks-list {
