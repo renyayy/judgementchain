@@ -8,6 +8,7 @@ mod ai;
 mod bibtex;
 mod vertex_ai;
 mod graph_backend;
+mod clustering;
 mod memory_budget;
 mod terminal;
 

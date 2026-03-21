@@ -10,7 +10,11 @@ fn default_vertex_model() -> String {
 }
 
 fn default_graph_backend() -> String {
-    "claude".to_string()
+    "vertex_ai".to_string()
+}
+
+fn default_max_top_clusters() -> usize {
+    8
 }
 
 fn default_max_system_memory_fraction() -> f64 {
@@ -64,6 +68,8 @@ pub struct AiConfig {
     pub vertex_ai_model: String,
     #[serde(default = "default_graph_backend")]
     pub graph_backend: String,
+    #[serde(default = "default_max_top_clusters")]
+    pub max_top_clusters: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -98,6 +104,7 @@ impl Default for Config {
                 vertex_ai_location: default_vertex_location(),
                 vertex_ai_model: default_vertex_model(),
                 graph_backend: default_graph_backend(),
+                max_top_clusters: default_max_top_clusters(),
             },
             git: GitConfig {
                 enabled: false,

@@ -898,51 +898,22 @@ pub struct GraphData {
     pub edges: Vec<GraphEdgeData>,
 }
 
-// Geminiレスポンス用中間型
+// ラベル付けレスポンス用
 #[derive(Debug, Deserialize)]
-struct KeywordEntry {
-    path: String,
-    keywords: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct GroupEntry {
-    #[serde(rename = "groupId")]
-    group_id: String,
-    #[serde(rename = "fileIds")]
-    file_ids: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct HierarchyChild {
+struct LabelEntry {
     id: String,
     label: String,
-    files: Vec<String>,
 }
 
-#[derive(Debug, Deserialize)]
-struct HierarchyTop {
-    #[serde(rename = "id")]
-    _id: String,
-    label: String,
-    children: Vec<HierarchyChild>,
-}
-
-#[derive(Debug, Deserialize)]
-struct HierarchyResult {
-    hierarchy: Vec<HierarchyTop>,
-}
-
-/// vault内の .md ファイルを解析してネットワークグラフデータを返す
+/// vault内の .md ファイルをembeddingベースでクラスタリングしグラフデータを返す
 #[tauri::command]
 pub async fn analyze_vault_for_graph(
     dir_path: String,
     state: State<'_, AppState>,
 ) -> Result<GraphData, String> {
-    // グラフ分析バックエンドを選択
     use crate::graph_backend::{GraphBackend, ClaudeCliBackend, VertexAiBackend};
 
-    let (graph_backend_name, sa_json, project_id, location, model) = {
+    let (graph_backend_name, sa_json, project_id, location, model, max_top_clusters) = {
         let config = state.config.read().map_err(|e| format!("Config lock error: {}", e))?;
         (
             config.ai.graph_backend.clone(),
@@ -950,32 +921,18 @@ pub async fn analyze_vault_for_graph(
             config.ai.vertex_ai_project_id.clone(),
             config.ai.vertex_ai_location.clone(),
             config.ai.vertex_ai_model.clone(),
+            config.ai.max_top_clusters,
         )
     };
 
-    let backend: Box<dyn GraphBackend> = match graph_backend_name.as_str() {
-        "vertex_ai" => {
-            if sa_json.is_empty() || project_id.is_empty() {
-                return Err("Vertex AI設定が不完全です。Graphパネルの⚙設定からサービスアカウントJSONとプロジェクトIDを設定してください。".to_string());
-            }
-            let access_token = crate::vertex_ai::get_access_token(&sa_json).await?;
-            Box::new(VertexAiBackend { access_token, project_id, location, model })
-        }
-        _ => {
-            eprintln!("[graph] backend: claude CLI");
-            Box::new(ClaudeCliBackend)
-        }
-    };
-
-    // .md ファイル一覧を収集（最大30件）
+    // 1. ファイル収集（隠しディレクトリ除外、上限なし）
     let expanded_dir = crate::config::expand_tilde(&dir_path);
-    let mut md_files: Vec<(String, String)> = Vec::new(); // (path, content_preview)
+    let mut md_files: Vec<String> = Vec::new();
 
     for entry in walkdir::WalkDir::new(&expanded_dir)
         .follow_links(false)
         .into_iter()
         .filter_entry(|e| {
-            // 隠しディレクトリ(.git, .obsidian等)をスキップ
             e.file_name().to_str().map_or(true, |name| !name.starts_with('.'))
         })
         .filter_map(|e| e.ok())
@@ -983,16 +940,7 @@ pub async fn analyze_vault_for_graph(
         if entry.file_type().is_file() {
             if let Some(ext) = entry.path().extension() {
                 if ext == "md" {
-                    let path_str = entry.path().to_string_lossy().to_string();
-                    let preview = std::fs::read_to_string(entry.path())
-                        .unwrap_or_default()
-                        .chars()
-                        .take(500)
-                        .collect::<String>();
-                    md_files.push((path_str, preview));
-                    if md_files.len() >= 30 {
-                        break;
-                    }
+                    md_files.push(entry.path().to_string_lossy().to_string());
                 }
             }
         }
@@ -1002,182 +950,220 @@ pub async fn analyze_vault_for_graph(
         return Err("解析対象の.mdファイルが見つかりませんでした。".to_string());
     }
 
-    // Phase 1: キーワード抽出（5件バッチ）
-    let mut keyword_map: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+    eprintln!("[graph] {} 件のファイルを検出", md_files.len());
 
-    for chunk in md_files.chunks(5) {
-        let mut prompt = "以下の複数のMarkdownファイルそれぞれから、内容を最もよく表す3〜5個のキーワードを日本語で抽出してください。JSON配列のみを返してください（説明不要）:\n[{\"path\":\"...\",\"keywords\":[\"kw1\",\"kw2\"]}]\n\n".to_string();
-
-        for (path, content) in chunk {
-            let filename = std::path::Path::new(path)
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or(path);
-            prompt.push_str(&format!("--- ファイル: {} ---\n{}\n\n", filename, content));
-            prompt.push_str(&format!("(フルパス: {})\n\n", path));
-        }
-
-        let response = backend.query(&prompt).await?;
-        let cleaned = crate::vertex_ai::clean_json_response_owned(&response);
-
-        let entries: Vec<KeywordEntry> = serde_json::from_str(&cleaned)
-            .map_err(|e| format!("キーワード抽出レスポンスパースエラー: {} / レスポンス: {}", e, &cleaned))?;
-
-        for entry in entries {
-            keyword_map.insert(entry.path, entry.keywords);
+    // 2. 各ファイルのcontent_hash計算
+    let mut file_hashes: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for path in &md_files {
+        if let Ok(content) = std::fs::read_to_string(path) {
+            use sha2::{Sha256, Digest};
+            let hash = format!("{:x}", Sha256::digest(content.as_bytes()));
+            file_hashes.insert(path.clone(), hash);
         }
     }
 
-    // Phase 2: グループ化（1コール）
-    let mut kw_list_str = String::from("[");
-    for (path, keywords) in &keyword_map {
-        let filename = std::path::Path::new(path)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or(path);
-        kw_list_str.push_str(&format!(
-            "{{\"path\":\"{}\",\"filename\":\"{}\",\"keywords\":{}}},",
-            path,
-            filename,
-            serde_json::to_string(keywords).unwrap_or_default()
-        ));
+    // 3. キャッシュチェック
+    let db = &state.db;
+    if db.is_cluster_cache_valid(&dir_path, &file_hashes) {
+        eprintln!("[graph] キャッシュヒット");
+        if let Ok(Some(tree)) = db.get_cluster_tree(&dir_path) {
+            return Ok(cluster_tree_to_graph_data(&tree));
+        }
     }
-    if kw_list_str.ends_with(',') {
-        kw_list_str.pop();
+
+    // 4. embeddingを取得（未計算のファイルはその場で生成）
+    let (emb_backend, emb_model) = {
+        let config = state.config.read().map_err(|e| format!("Config lock error: {}", e))?;
+        (config.ai.backend.clone(), config.ai.embedding_model.clone())
+    };
+
+    let mut file_embeddings: Vec<(String, Vec<f32>)> = Vec::new();
+    let mut generated = 0;
+    let mut failed = 0;
+    for path in &md_files {
+        match db.get_embedding(path) {
+            Ok(Some(emb)) => file_embeddings.push((path.clone(), emb)),
+            _ => {
+                // embedding未計算 → その場で生成
+                if let Ok(content) = std::fs::read_to_string(path) {
+                    let content_hash = crate::vault::compute_content_hash(&content);
+                    if let Some(emb) = crate::ai::generate_embedding(&emb_backend, &emb_model, &content) {
+                        let _ = db.store_embedding(path, &emb, &content_hash);
+                        file_embeddings.push((path.clone(), emb));
+                        generated += 1;
+                        eprintln!("[graph] embedding生成: {}", path);
+                    } else {
+                        failed += 1;
+                        eprintln!("[graph] embedding生成失敗: {}", path);
+                    }
+                } else {
+                    failed += 1;
+                }
+            }
+        }
     }
-    kw_list_str.push(']');
 
-    let group_prompt = format!(
-        "以下はMarkdownファイルとそのキーワードの一覧です。キーワードの類似性に基づいて、意味的に近いファイルをグループ化してください。グループ数は4〜8程度にしてください。JSON配列のみを返してください（説明不要）:\n[{{\"groupId\":\"g1\",\"fileIds\":[\"path1\",\"path2\"]}}]\n\nファイル一覧:\n{}",
-        kw_list_str
-    );
-
-    let group_response = backend.query(&group_prompt).await?;
-    let group_cleaned = crate::vertex_ai::clean_json_response_owned(&group_response);
-
-    let groups: Vec<GroupEntry> = serde_json::from_str(&group_cleaned)
-        .map_err(|e| format!("グループ化レスポンスパースエラー: {} / レスポンス: {}", e, &group_cleaned))?;
-
-    // Phase 3: 2トップグループへの集約＋ラベリング（1コール）
-    let mut groups_str = String::from("[");
-    for g in &groups {
-        let file_names: Vec<String> = g.file_ids.iter()
-            .map(|p| std::path::Path::new(p)
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or(p)
-                .to_string())
-            .collect();
-        groups_str.push_str(&format!(
-            "{{\"id\":\"{}\",\"files\":{}}},",
-            g.group_id,
-            serde_json::to_string(&file_names).unwrap_or_default()
-        ));
+    if generated > 0 {
+        eprintln!("[graph] {} 件のembeddingを新規生成", generated);
     }
-    if groups_str.ends_with(',') {
-        groups_str.pop();
+
+    if file_embeddings.is_empty() {
+        return Err("embeddingを生成できませんでした。Ollamaが起動しているか確認してください。".to_string());
     }
-    groups_str.push(']');
 
-    let hierarchy_prompt = format!(
-        "以下のグループ一覧を、意味的に最も近いもの同士でまとめ、最終的に2つの大きなグループになるよう階層構造を作ってください。各グループ・サブグループに短い日本語のジャンル名（5〜15文字）を付けてください。JSONオブジェクトのみを返してください（説明不要）:\n{{\"hierarchy\":[{{\"id\":\"top1\",\"label\":\"ジャンル名\",\"children\":[{{\"id\":\"g1\",\"label\":\"サブジャンル名\",\"files\":[\"filename.md\"]}}]}}]}}\n\nグループ一覧:\n{}",
-        groups_str
-    );
+    if failed > 0 {
+        eprintln!("[graph] {} 件のファイルでembedding生成に失敗", failed);
+    }
 
-    let hierarchy_response = backend.query(&hierarchy_prompt).await?;
-    let hierarchy_cleaned = crate::vertex_ai::clean_json_response_owned(&hierarchy_response);
+    eprintln!("[graph] {} 件のファイルでクラスタリング実行", file_embeddings.len());
 
-    let hierarchy: HierarchyResult = serde_json::from_str(&hierarchy_cleaned)
-        .map_err(|e| format!("階層化レスポンスパースエラー: {} / レスポンス: {}", e, hierarchy_cleaned))?;
+    // 5. 再帰的クラスタリング
+    let mut tree = crate::clustering::build_cluster_tree(&file_embeddings, max_top_clusters);
 
-    // グラフデータを構築
+    // 6. LLMでラベル付け（GraphBackend経由）
+    let backend: Option<Box<dyn GraphBackend>> = match graph_backend_name.as_str() {
+        "vertex_ai" => {
+            if !sa_json.is_empty() && !project_id.is_empty() {
+                match crate::vertex_ai::get_access_token(&sa_json).await {
+                    Ok(access_token) => Some(Box::new(VertexAiBackend { access_token, project_id, location, model })),
+                    Err(e) => {
+                        eprintln!("[graph] Vertex AI認証失敗、ラベルなしで続行: {}", e);
+                        None
+                    }
+                }
+            } else {
+                eprintln!("[graph] Vertex AI未設定、ラベルなしで続行");
+                None
+            }
+        }
+        "claude" => Some(Box::new(ClaudeCliBackend)),
+        _ => None,
+    };
+
+    if let Some(backend) = &backend {
+        // レベル1以上（クラスタノード）にラベル付け
+        for level_idx in 1..tree.levels.len() {
+            let cluster_info: Vec<(String, Vec<String>)> = tree.levels[level_idx]
+                .iter()
+                .map(|node| {
+                    let filenames: Vec<String> = node.file_paths.iter()
+                        .map(|p| {
+                            std::path::Path::new(p)
+                                .file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or(p)
+                                .to_string()
+                        })
+                        .collect();
+                    (node.id.clone(), filenames)
+                })
+                .collect();
+
+            let mut prompt = "以下のクラスタに、それぞれ短い日本語のジャンル名（5〜15文字）を付けてください。JSON配列のみを返してください（説明不要）:\n[{\"id\":\"クラスタID\",\"label\":\"ジャンル名\"}]\n\nクラスタ一覧:\n".to_string();
+
+            for (id, files) in &cluster_info {
+                prompt.push_str(&format!("- {}: {}\n", id, files.join(", ")));
+            }
+
+            match backend.query(&prompt).await {
+                Ok(response) => {
+                    let cleaned = crate::vertex_ai::clean_json_response_owned(&response);
+                    if let Ok(labels) = serde_json::from_str::<Vec<LabelEntry>>(&cleaned) {
+                        for label_entry in labels {
+                            if let Some(node) = tree.levels[level_idx].iter_mut().find(|n| n.id == label_entry.id) {
+                                node.label = Some(label_entry.label);
+                            }
+                        }
+                    } else {
+                        eprintln!("[graph] ラベルパース失敗、デフォルトラベルを使用");
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[graph] ラベル付けエラー: {}", e);
+                }
+            }
+        }
+    }
+
+    // ラベルがないノードにデフォルトラベルを設定
+    for level in &mut tree.levels {
+        for node in level.iter_mut() {
+            if node.label.is_none() && !node.child_ids.is_empty() {
+                node.label = Some(format!("グループ ({}件)", node.file_paths.len()));
+            }
+        }
+    }
+
+    // 7. キャッシュ保存
+    if let Err(e) = db.store_cluster_tree(&dir_path, &tree, &file_hashes) {
+        eprintln!("[graph] キャッシュ保存エラー: {}", e);
+    }
+
+    // 8. GraphDataに変換して返す
+    Ok(cluster_tree_to_graph_data(&tree))
+}
+
+/// ClusterTree → GraphData 変換
+fn cluster_tree_to_graph_data(tree: &crate::clustering::ClusterTree) -> GraphData {
     let mut nodes: Vec<GraphNodeData> = Vec::new();
     let mut edges: Vec<GraphEdgeData> = Vec::new();
     let mut edge_counter = 0usize;
 
-    // ファイルパスのlookup（filenameからfullpathへ）
-    let path_lookup: std::collections::HashMap<String, String> = md_files.iter()
-        .map(|(p, _)| {
-            let name = std::path::Path::new(p)
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or(p)
-                .to_string();
-            (name, p.clone())
-        })
-        .collect();
+    let total_levels = tree.levels.len();
 
-    for (top_idx, top) in hierarchy.hierarchy.iter().enumerate() {
-        let top_id = format!("top_{}", top_idx);
+    for (level_idx, level) in tree.levels.iter().enumerate() {
+        for node in level {
+            let (node_type, path, level_num) = if level_idx == 0 {
+                // ファイルノード: level = 1
+                ("file".to_string(), Some(node.id.clone()), 1u32)
+            } else {
+                // クラスタノード: level = level_idx + 1
+                ("group".to_string(), None, (level_idx + 1) as u32)
+            };
 
-        // トップグループノード（level=3）
-        nodes.push(GraphNodeData {
-            id: top_id.clone(),
-            node_type: "group".to_string(),
-            label: top.label.clone(),
-            path: None,
-            keywords: vec![],
-            level: 3,
-            group_id: None,
-            child_ids: top.children.iter().map(|c| format!("mid_{}_{}", top_idx, c.id)).collect(),
-        });
-
-        for (_child_idx, child) in top.children.iter().enumerate() {
-            let mid_id = format!("mid_{}_{}", top_idx, child.id);
-
-            // 中間グループノード（level=2）
-            nodes.push(GraphNodeData {
-                id: mid_id.clone(),
-                node_type: "group".to_string(),
-                label: child.label.clone(),
-                path: None,
-                keywords: vec![],
-                level: 2,
-                group_id: Some(top_id.clone()),
-                child_ids: child.files.iter().map(|f| {
-                    path_lookup.get(f).cloned().unwrap_or_else(|| f.clone())
-                }).collect(),
-            });
-
-            // 中間グループ → トップグループ エッジ
-            edges.push(GraphEdgeData {
-                id: format!("e{}", edge_counter),
-                source: mid_id.clone(),
-                target: top_id.clone(),
-            });
-            edge_counter += 1;
-
-            // ファイルノード（level=1）
-            for filename in &child.files {
-                let full_path = path_lookup.get(filename).cloned().unwrap_or_else(|| filename.clone());
-                let label = std::path::Path::new(&full_path)
+            let label = if level_idx == 0 {
+                std::path::Path::new(&node.id)
                     .file_name()
                     .and_then(|n| n.to_str())
-                    .unwrap_or(&full_path)
-                    .to_string();
-                let file_keywords = keyword_map.get(&full_path).cloned().unwrap_or_default();
+                    .unwrap_or(&node.id)
+                    .to_string()
+            } else {
+                node.label.clone().unwrap_or_else(|| format!("L{}C{}", level_idx, &node.id))
+            };
 
-                nodes.push(GraphNodeData {
-                    id: full_path.clone(),
-                    node_type: "file".to_string(),
-                    label,
-                    path: Some(full_path.clone()),
-                    keywords: file_keywords,
-                    level: 1,
-                    group_id: Some(mid_id.clone()),
-                    child_ids: vec![],
-                });
+            nodes.push(GraphNodeData {
+                id: node.id.clone(),
+                node_type,
+                label,
+                path,
+                keywords: vec![],
+                level: level_num,
+                group_id: node.parent_id.clone(),
+                child_ids: node.child_ids.clone(),
+            });
 
-                // ファイル → 中間グループ エッジ
+            // 子→親エッジ
+            if let Some(parent_id) = &node.parent_id {
                 edges.push(GraphEdgeData {
                     id: format!("e{}", edge_counter),
-                    source: full_path.clone(),
-                    target: mid_id.clone(),
+                    source: node.id.clone(),
+                    target: parent_id.clone(),
                 });
                 edge_counter += 1;
             }
         }
     }
 
-    Ok(GraphData { nodes, edges })
+    // total_levels をノードに含める（フロントエンドでフロア選択に使用）
+    // GraphDataにtotal_levelsフィールドを追加する代わりに、
+    // 最上位グループノードのkeywordsに階数情報を埋め込む（後方互換）
+    if let Some(top_level) = tree.levels.last() {
+        if let Some(top_node) = top_level.first() {
+            if let Some(graph_node) = nodes.iter_mut().find(|n| n.id == top_node.id) {
+                graph_node.keywords = vec![format!("total_levels:{}", total_levels)];
+            }
+        }
+    }
+
+    GraphData { nodes, edges }
 }

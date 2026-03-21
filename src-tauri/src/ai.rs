@@ -125,26 +125,9 @@ impl CandleState {
     }
 
     fn select_gpu_device() -> Option<Device> {
-        #[cfg(target_os = "linux")]
-        {
-            match Device::new_cuda(0) {
-                Ok(device) => {
-                    eprintln!("[ai] CUDA デバイスを検出しました");
-                    return Some(device);
-                }
-                Err(e) => eprintln!("[ai] CUDA 初期化失敗: {}", e),
-            }
-        }
-        #[cfg(target_os = "macos")]
-        {
-            match Device::new_metal(0) {
-                Ok(device) => {
-                    eprintln!("[ai] Metal デバイスを検出しました");
-                    return Some(device);
-                }
-                Err(e) => eprintln!("[ai] Metal 初期化失敗: {}", e),
-            }
-        }
+        // TODO: Metal/CUDA を有効化する場合はここを戻す
+        // 現在は安定性のため CPU のみ使用
+        eprintln!("[ai] CPU モードで動作します（GPU は無効化中）");
         None
     }
 
@@ -387,9 +370,7 @@ fn parse_float_array(s: &str) -> Option<Vec<f32>> {
 }
 
 /// テキストからembeddingを生成（backend設定に基づく）。
-pub fn generate_embedding(backend: &str, model: &str, text: &str) -> Option<Vec<f32>> {
-    match backend {
-        "ollama" => embed_with_ollama(model, text),
-        _ => None,
-    }
+pub fn generate_embedding(_backend: &str, model: &str, text: &str) -> Option<Vec<f32>> {
+    // embeddingは常にOllama経由（Vertex AIにはembedding機能を使わない）
+    embed_with_ollama(model, text)
 }

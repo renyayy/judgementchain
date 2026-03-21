@@ -81,10 +81,31 @@ impl Database {
                 checked_at INTEGER NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS cluster_cache (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                vault_path TEXT NOT NULL,
+                level INTEGER NOT NULL,
+                cluster_id TEXT NOT NULL,
+                centroid BLOB NOT NULL,
+                file_paths TEXT NOT NULL,
+                child_ids TEXT NOT NULL,
+                parent_id TEXT,
+                label TEXT,
+                UNIQUE(vault_path, cluster_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS cluster_meta (
+                vault_path TEXT PRIMARY KEY,
+                total_levels INTEGER NOT NULL,
+                file_hashes TEXT NOT NULL,
+                created_at INTEGER NOT NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_wikilinks_source ON wikilinks(source);
             CREATE INDEX IF NOT EXISTS idx_wikilinks_target ON wikilinks(target);
             CREATE INDEX IF NOT EXISTS idx_activity_log_file ON activity_log(file_path);
             CREATE INDEX IF NOT EXISTS idx_note_embeddings_path ON note_embeddings(file_path);
+            CREATE INDEX IF NOT EXISTS idx_cluster_cache_vault ON cluster_cache(vault_path);
         ")?;
         Ok(())
     }
@@ -299,6 +320,138 @@ impl Database {
         .filter_map(|r| r.ok())
         .collect();
         Ok(rows)
+    }
+
+    // --- クラスタリングキャッシュ ---
+
+    pub fn store_cluster_tree(
+        &self,
+        vault_path: &str,
+        tree: &crate::clustering::ClusterTree,
+        file_hashes: &std::collections::HashMap<String, String>,
+    ) -> Result<(), String> {
+        let conn = self.conn.lock().map_err(|e| format!("Lock error: {}", e))?;
+
+        // 既存キャッシュを削除
+        conn.execute("DELETE FROM cluster_cache WHERE vault_path = ?1", params![vault_path])
+            .map_err(|e| format!("Failed to clear cluster cache: {}", e))?;
+        conn.execute("DELETE FROM cluster_meta WHERE vault_path = ?1", params![vault_path])
+            .map_err(|e| format!("Failed to clear cluster meta: {}", e))?;
+
+        // 各レベルのノードを保存
+        for (level_idx, level) in tree.levels.iter().enumerate() {
+            for node in level {
+                let centroid_bytes: Vec<u8> = node.centroid.iter().flat_map(|f| f.to_le_bytes()).collect();
+                let file_paths_json = serde_json::to_string(&node.file_paths).unwrap_or_default();
+                let child_ids_json = serde_json::to_string(&node.child_ids).unwrap_or_default();
+
+                conn.execute(
+                    "INSERT OR REPLACE INTO cluster_cache (vault_path, level, cluster_id, centroid, file_paths, child_ids, parent_id, label) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    params![
+                        vault_path,
+                        level_idx as i64,
+                        node.id,
+                        centroid_bytes,
+                        file_paths_json,
+                        child_ids_json,
+                        node.parent_id,
+                        node.label,
+                    ],
+                ).map_err(|e| format!("Failed to store cluster node: {}", e))?;
+            }
+        }
+
+        // メタ情報を保存
+        let hashes_json = serde_json::to_string(file_hashes).unwrap_or_default();
+        let now = chrono::Utc::now().timestamp();
+        conn.execute(
+            "INSERT OR REPLACE INTO cluster_meta (vault_path, total_levels, file_hashes, created_at) VALUES (?1, ?2, ?3, ?4)",
+            params![vault_path, tree.levels.len() as i64, hashes_json, now],
+        ).map_err(|e| format!("Failed to store cluster meta: {}", e))?;
+
+        Ok(())
+    }
+
+    pub fn get_cluster_tree(&self, vault_path: &str) -> Result<Option<crate::clustering::ClusterTree>, String> {
+        let conn = self.conn.lock().map_err(|e| format!("Lock error: {}", e))?;
+
+        // メタ情報を取得
+        let total_levels: i64 = match conn.query_row(
+            "SELECT total_levels FROM cluster_meta WHERE vault_path = ?1",
+            params![vault_path],
+            |row| row.get(0),
+        ) {
+            Ok(v) => v,
+            Err(_) => return Ok(None),
+        };
+
+        let mut levels: Vec<Vec<crate::clustering::ClusterNode>> = Vec::new();
+
+        for level_idx in 0..total_levels {
+            let mut stmt = conn.prepare(
+                "SELECT cluster_id, centroid, file_paths, child_ids, parent_id, label FROM cluster_cache WHERE vault_path = ?1 AND level = ?2"
+            ).map_err(|e| format!("Prepare error: {}", e))?;
+
+            let nodes: Vec<crate::clustering::ClusterNode> = stmt.query_map(
+                params![vault_path, level_idx],
+                |row| {
+                    let centroid_bytes: Vec<u8> = row.get(1)?;
+                    let file_paths_json: String = row.get(2)?;
+                    let child_ids_json: String = row.get(3)?;
+                    let parent_id: Option<String> = row.get(4)?;
+                    let label: Option<String> = row.get(5)?;
+
+                    Ok(crate::clustering::ClusterNode {
+                        id: row.get(0)?,
+                        centroid: bytes_to_f32_vec(&centroid_bytes),
+                        file_paths: serde_json::from_str(&file_paths_json).unwrap_or_default(),
+                        child_ids: serde_json::from_str(&child_ids_json).unwrap_or_default(),
+                        parent_id,
+                        label,
+                    })
+                },
+            ).map_err(|e| format!("Query error: {}", e))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+            levels.push(nodes);
+        }
+
+        Ok(Some(crate::clustering::ClusterTree { levels }))
+    }
+
+    pub fn is_cluster_cache_valid(
+        &self,
+        vault_path: &str,
+        current_hashes: &std::collections::HashMap<String, String>,
+    ) -> bool {
+        let conn = match self.conn.lock() {
+            Ok(c) => c,
+            Err(_) => return false,
+        };
+
+        let stored_hashes_json: String = match conn.query_row(
+            "SELECT file_hashes FROM cluster_meta WHERE vault_path = ?1",
+            params![vault_path],
+            |row| row.get(0),
+        ) {
+            Ok(v) => v,
+            Err(_) => return false,
+        };
+
+        let stored_hashes: std::collections::HashMap<String, String> =
+            serde_json::from_str(&stored_hashes_json).unwrap_or_default();
+
+        &stored_hashes == current_hashes
+    }
+
+    pub fn clear_cluster_cache(&self, vault_path: &str) -> Result<(), String> {
+        let conn = self.conn.lock().map_err(|e| format!("Lock error: {}", e))?;
+        conn.execute("DELETE FROM cluster_cache WHERE vault_path = ?1", params![vault_path])
+            .map_err(|e| format!("Failed to clear cluster cache: {}", e))?;
+        conn.execute("DELETE FROM cluster_meta WHERE vault_path = ?1", params![vault_path])
+            .map_err(|e| format!("Failed to clear cluster meta: {}", e))?;
+        Ok(())
     }
 }
 

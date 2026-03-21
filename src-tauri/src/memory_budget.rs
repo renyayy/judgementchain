@@ -19,17 +19,17 @@ fn total_physical_bytes() -> u64 {
     sys.total_memory()
 }
 
-fn this_process_virtual_memory_bytes() -> u64 {
+fn this_process_rss_bytes() -> u64 {
     let mut sys = System::new();
     let pid = Pid::from_u32(std::process::id());
     sys.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
     sys
         .process(pid)
-        .map(|p| p.virtual_memory())
+        .map(|p| p.memory())
         .unwrap_or(0)
 }
 
-/// モデル mmap と推論用バッファの粗い見積もり（RLIMIT_AS は仮想メモリ基準のため VM で揃える）。
+/// モデル mmap と推論用バッファの粗い見積もり。
 fn estimated_extra_bytes_for_gguf(model_file_len: u64) -> u64 {
     const KV_HEADROOM: u64 = 384 * 1024 * 1024;
     model_file_len.saturating_mul(2).saturating_add(KV_HEADROOM)
@@ -52,8 +52,8 @@ pub fn check_model_load_allowed(fraction: f64, model_path: &Path) -> Result<(), 
         .map_err(|e| format!("モデルファイルのメタデータ取得に失敗: {}", e))?;
     let file_len = meta.len();
 
-    let current_vm = this_process_virtual_memory_bytes();
-    let projected = current_vm.saturating_add(estimated_extra_bytes_for_gguf(file_len));
+    let current_rss = this_process_rss_bytes();
+    let projected = current_rss.saturating_add(estimated_extra_bytes_for_gguf(file_len));
 
     if projected > cap {
         return Err(format!(
@@ -62,7 +62,7 @@ pub fn check_model_load_allowed(fraction: f64, model_path: &Path) -> Result<(), 
              `config.toml` の [performance] max_system_memory_fraction を下げるか 0 で無効化できます。",
             (fraction * 100.0) as u32,
             cap / 1024 / 1024,
-            current_vm / 1024 / 1024,
+            current_rss / 1024 / 1024,
             projected / 1024 / 1024
         ));
     }
