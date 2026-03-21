@@ -3,6 +3,27 @@ use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// Vertex / Gemini の HTTP 生ボディは機密を含むため、**デバッグビルド**（`cfg!(debug_assertions)`）のときだけ stderr に全文ダンプする。
+/// リリースビルドでは環境変数を含め一切出さない。
+/// CI 等でデバッグビルドでも抑止する場合は `JUDGEMENTCHAIN_VERTEX_AI_DEBUG_RAW=0|false|no|off`。
+const VERTEX_AI_DEBUG_RAW_ENV: &str = "JUDGEMENTCHAIN_VERTEX_AI_DEBUG_RAW";
+
+fn vertex_ai_stderr_dump_raw_body_enabled() -> bool {
+    if !cfg!(debug_assertions) {
+        return false;
+    }
+    match std::env::var(VERTEX_AI_DEBUG_RAW_ENV) {
+        Ok(v) => {
+            let v = v.trim();
+            !(v.eq_ignore_ascii_case("0")
+                || v.eq_ignore_ascii_case("false")
+                || v.eq_ignore_ascii_case("no")
+                || v.eq_ignore_ascii_case("off"))
+        }
+        Err(_) => true,
+    }
+}
+
 // --- サービスアカウントJSON構造 ---
 #[derive(Debug, Deserialize)]
 struct ServiceAccount {
@@ -163,11 +184,12 @@ pub async fn call_gemini(
     let status = resp.status();
     let body_text = resp.text().await.unwrap_or_default();
 
-    // デバッグ用: レスポンスをそのまま出力（パース失敗の原因特定用）
-    eprintln!(
-        "--- GEMINI RAW RESPONSE START ---\n{}\n--- GEMINI RAW RESPONSE END ---",
-        body_text
-    );
+    if vertex_ai_stderr_dump_raw_body_enabled() {
+        eprintln!(
+            "--- GEMINI RAW RESPONSE START ---\n{}\n--- GEMINI RAW RESPONSE END ---",
+            body_text
+        );
+    }
 
     if !status.is_success() {
         return Err(format!("Gemini API失敗 ({}): {}", status, body_text));

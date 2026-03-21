@@ -628,13 +628,10 @@ function AppInner() {
           />
         )}
 
-
-
         {rightPanel === "plugins" && <PluginSettings />}
         {activePluginPanel && rightPanel !== "plugins" && (
           <PluginPanelHost panel={activePluginPanel} />
-        )}
-        </div>{/* app-body-main */}
+        )}        </div>{/* app-body-main */}
         <TerminalPanel
           isOpen={terminalOpen}
           height={terminalHeight}
@@ -646,6 +643,7 @@ function AppInner() {
           rightPanel={rightPanel}
           onToggleRightPanel={toggleRightPanel}
           pluginPanels={pluginPanels}
+
         />
       </div>
       <StatusBar />
