@@ -5,6 +5,17 @@ use crate::config::Config;
 use crate::database::ActivityLog;
 use crate::vault::{FileEntry, NoteContent};
 
+#[derive(Serialize, Deserialize, Clone)]
+pub struct PluginManifest {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub description: Option<String>,
+    pub main: String, // e.g. "main.js"
+    pub capabilities: Option<Vec<String>>,
+    pub enabled: Option<bool>,
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct MarginAnnotation {
     pub id: String,
@@ -348,6 +359,97 @@ pub async fn reload_config(state: State<'_, AppState>) -> Result<bool, String> {
     *current = new_config;
 
     Ok(true)
+}
+
+#[tauri::command]
+pub async fn list_plugins(state: State<'_, AppState>) -> Result<Vec<PluginManifest>, String> {
+    let plugins_root = {
+        let config = state.config.read().map_err(|e| format!("Config lock error: {}", e))?;
+        config.get_plugins_path()
+    };
+    if !plugins_root.exists() {
+        return Ok(vec![]);
+    }
+
+    let mut out: Vec<PluginManifest> = vec![];
+
+    for entry in std::fs::read_dir(&plugins_root).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+
+        let manifest_path = path.join("manifest.json");
+        if !manifest_path.exists() {
+            continue;
+        }
+
+        let raw = std::fs::read_to_string(&manifest_path)
+            .map_err(|e| format!("Failed to read manifest: {}", e))?;
+        let mut manifest: PluginManifest = serde_json::from_str(&raw)
+            .map_err(|e| format!("Failed to parse manifest.json: {}", e))?;
+
+        // manifest.id が空/欠落していた場合、フォルダ名を補完
+        if manifest.id.trim().is_empty() {
+            if let Some(folder_name) = path.file_name().and_then(|s| s.to_str()) {
+                manifest.id = folder_name.to_string();
+            }
+        }
+
+        out.push(manifest);
+    }
+
+    Ok(out)
+}
+
+#[tauri::command]
+pub async fn read_plugin_file(
+    pluginId: String,
+    file: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let (vault_path, plugins_root) = {
+        let config = state.config.read().map_err(|e| format!("Config lock error: {}", e))?;
+        (
+            config.get_vault_path().to_string_lossy().to_string(),
+            config.get_plugins_path(),
+        )
+    };
+
+    if pluginId.contains('/') || pluginId.contains('\\') {
+        return Err("Invalid pluginId".to_string());
+    }
+    if file.starts_with('/') || file.contains("..") || file.contains('\\') {
+        return Err("Invalid file path".to_string());
+    }
+
+    // 1) plugins_path（デフォルト: ~/.config/nomos/plugins）を優先
+    let plugin_dir_from_plugins_path = plugins_root.join(&pluginId);
+    let full_path_plugins_root = plugin_dir_from_plugins_path.join(&file);
+    let exists_plugins_root = full_path_plugins_root.exists();
+
+    // 2) 互換: vault 配下の <vault>/.nomos/plugins もフォールバック
+    let plugin_dir_from_vault = std::path::Path::new(&vault_path)
+        .join(".nomos")
+        .join("plugins")
+        .join(&pluginId);
+    let full_path_vault = plugin_dir_from_vault.join(&file);
+    let exists_vault = full_path_vault.exists();
+
+    let resolved_exists = exists_plugins_root || exists_vault;
+    let resolved_full_path = if exists_plugins_root {
+        full_path_plugins_root.clone()
+    } else {
+        full_path_vault.clone()
+    };
+
+    if !resolved_exists {
+        return Err("Plugin file not found".to_string());
+    }
+
+    std::fs::read_to_string(&resolved_full_path)
+        .map_err(|e| format!("Failed to read plugin file: {}", e))
 }
 
 #[tauri::command]
