@@ -17,41 +17,13 @@ type Collector = {
 };
 
 async function loadPluginModule(code: string): Promise<any> {
-  // 1) 通常: Blob URL から ESM import
+  const blob = new Blob([code], { type: "text/javascript" });
+  const url = URL.createObjectURL(blob);
   try {
-    const blob = new Blob([code], { type: "text/javascript" });
-    const url = URL.createObjectURL(blob);
-    try {
-      return await import(/* @vite-ignore */ url);
-    } finally {
-      URL.revokeObjectURL(url);
-    }
-  } catch {
-    // 2) フォールバック: `export default function init(api){...}` を新 Function で評価
-    // Tauri の WebView 環境によっては Blob URL の ESM import が制限されることがあるため。
+    return await import(/* @vite-ignore */ url);
+  } finally {
+    URL.revokeObjectURL(url);
   }
-
-  // Matches: export default function init(api) { ... }
-  const fnMatch = code.match(/export\s+default\s+function\s+([A-Za-z0-9_$]+)\s*\(/);
-  if (fnMatch?.[1]) {
-    const fnName = fnMatch[1];
-    const transformed = code.replace(/export\s+default\s+function\s+([A-Za-z0-9_$]+)\s*\(/, `function ${fnName}(`);
-    // eslint-disable-next-line no-new-func
-    const fn = new Function(`"use strict";\n${transformed}\nreturn ${fnName};`)();
-    return { default: fn, init: fn };
-  }
-
-  // Matches: export default init;
-  const idMatch = code.match(/export\s+default\s+([A-Za-z0-9_$]+)\s*;?\s*$/m);
-  if (idMatch?.[1]) {
-    const fnName = idMatch[1];
-    const transformed = code.replace(/export\s+default\s+([A-Za-z0-9_$]+)\s*;?\s*$/m, ``);
-    // eslint-disable-next-line no-new-func
-    const fn = new Function(`"use strict";\n${transformed}\nreturn ${fnName};`)();
-    return { default: fn, init: fn };
-  }
-
-  throw new Error("Unsupported plugin module format");
 }
 
 function pickInitFn(mod: any): ((api: NomosPluginAPI) => void | Promise<void>) | null {
