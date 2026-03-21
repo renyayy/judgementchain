@@ -7,6 +7,23 @@ import type { GraphData } from "../types";
 
 cytoscape.use(dagre);
 
+function getTotalLevels(graphData: GraphData): number {
+  for (const node of graphData.nodes) {
+    for (const kw of node.keywords) {
+      if (kw.startsWith("total_levels:")) return parseInt(kw.split(":")[1], 10);
+    }
+  }
+  return Math.max(...graphData.nodes.map(n => n.level), 1);
+}
+
+function filterGraphByFloor(graphData: GraphData, floor: number): GraphData {
+  // 選択したフロアのノード + 親レベルのノードを表示
+  const nodes = graphData.nodes.filter(n => n.level === floor || n.level === floor + 1);
+  const nodeIds = new Set(nodes.map(n => n.id));
+  const edges = graphData.edges.filter(e => nodeIds.has(e.source) && nodeIds.has(e.target));
+  return { nodes, edges };
+}
+
 interface GraphPanelProps {
   vaultPath: string;
   onOpenFile: (path: string) => void;
@@ -31,6 +48,10 @@ export default function GraphPanel({ vaultPath, onOpenFile }: GraphPanelProps) {
   const cyRef = useRef<HTMLDivElement>(null);
   const cyInstance = useRef<cytoscape.Core | null>(null);
   const [tooltip, setTooltip] = useState<TooltipState>({ visible: false, text: "", x: 0, y: 0 });
+
+  // フロア選択
+  const [selectedFloor, setSelectedFloor] = useState<number | null>(null);
+  const [totalLevels, setTotalLevels] = useState(0);
 
   // 設定パネル
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -132,40 +153,32 @@ export default function GraphPanel({ vaultPath, onOpenFile }: GraphPanelProps) {
             color: "var(--fg, #e6edf3)",
           },
         },
-        {
-          selector: 'node[type="group"][level=2]',
-          style: {
-            width: 30,
-            height: 30,
-            "background-color": "var(--accent, #58a6ff)",
-            "border-width": 0,
-            label: "data(label)",
-            "text-valign": "bottom",
-            "text-halign": "center",
-            "font-size": "9px",
-            color: "var(--fg, #e6edf3)",
-            "text-wrap": "wrap",
-            "text-max-width": "80px",
-          },
-        },
-        {
-          selector: 'node[type="group"][level=3]',
-          style: {
-            width: 52,
-            height: 52,
-            "background-color": "var(--accent-emphasis, #1f6feb)",
-            "border-width": 2,
-            "border-color": "var(--accent, #58a6ff)",
-            label: "data(label)",
-            "text-valign": "bottom",
-            "text-halign": "center",
-            "font-size": "11px",
-            "font-weight": "bold",
-            color: "var(--fg, #e6edf3)",
-            "text-wrap": "wrap",
-            "text-max-width": "100px",
-          },
-        },
+        // 動的グループノードスタイル（レベル数に応じてスケール）
+        ...Array.from({ length: Math.max(totalLevels - 1, 2) }, (_, i) => {
+          const lvl = i + 2;
+          const maxLvl = Math.max(totalLevels, 3);
+          const t = (lvl - 1) / Math.max(maxLvl - 1, 1);
+          const size = 20 + t * 40;
+          const fontSize = 9 + t * 3;
+          return {
+            selector: `node[type="group"][level=${lvl}]`,
+            style: {
+              width: size,
+              height: size,
+              "background-color": t > 0.5 ? "var(--accent-emphasis, #1f6feb)" : "var(--accent, #58a6ff)",
+              "border-width": t > 0.5 ? 2 : 0,
+              "border-color": "var(--accent, #58a6ff)",
+              label: "data(label)",
+              "text-valign": "bottom" as const,
+              "text-halign": "center" as const,
+              "font-size": `${fontSize}px`,
+              "font-weight": (t > 0.7 ? "bold" : "normal") as cytoscape.Css.FontWeight,
+              color: "var(--fg, #e6edf3)",
+              "text-wrap": "wrap" as const,
+              "text-max-width": `${70 + t * 40}px`,
+            },
+          };
+        }),
         {
           selector: "edge",
           style: {
@@ -235,7 +248,10 @@ export default function GraphPanel({ vaultPath, onOpenFile }: GraphPanelProps) {
 
   useEffect(() => {
     if (status === "done" && data) {
-      buildGraph(data);
+      const levels = getTotalLevels(data);
+      setTotalLevels(levels);
+      const filtered = selectedFloor !== null ? filterGraphByFloor(data, selectedFloor) : data;
+      buildGraph(filtered);
     }
     return () => {
       if (status !== "done") {
@@ -243,7 +259,7 @@ export default function GraphPanel({ vaultPath, onOpenFile }: GraphPanelProps) {
         cyInstance.current = null;
       }
     };
-  }, [status, data, buildGraph]);
+  }, [status, data, selectedFloor, buildGraph]);
 
   useEffect(() => {
     return () => {
@@ -362,6 +378,26 @@ export default function GraphPanel({ vaultPath, onOpenFile }: GraphPanelProps) {
           <div className="graph-error">
             <p>⚠ エラーが発生しました</p>
             <pre>{error}</pre>
+          </div>
+        )}
+
+        {status === "done" && totalLevels > 1 && (
+          <div className="graph-floor-selector">
+            {Array.from({ length: totalLevels }, (_, i) => i + 1).map(floor => (
+              <button
+                key={floor}
+                className={`graph-floor-btn ${selectedFloor === floor ? "active" : ""}`}
+                onClick={() => setSelectedFloor(floor)}
+              >
+                F{floor}
+              </button>
+            ))}
+            <button
+              className={`graph-floor-btn ${selectedFloor === null ? "active" : ""}`}
+              onClick={() => setSelectedFloor(null)}
+            >
+              全体
+            </button>
           </div>
         )}
 

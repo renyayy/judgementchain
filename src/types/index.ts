@@ -61,7 +61,7 @@ export interface GroupGraphNode {
   label: string;
   path: null;
   keywords: string[];
-  level: 2 | 3;
+  level: number;
   group_id: string | null;
   child_ids: string[];
 }

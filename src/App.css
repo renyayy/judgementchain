@@ -1982,6 +1982,36 @@ body.resizing * {
   overflow-y: auto;
 }
 
+.graph-floor-selector {
+  display: flex;
+  gap: 2px;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-tertiary);
+  flex-shrink: 0;
+}
+
+.graph-floor-btn {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  color: var(--fg-muted);
+  border-radius: 3px;
+  padding: 1px 8px;
+  font-size: 10px;
+  cursor: pointer;
+  font-family: monospace;
+}
+
+.graph-floor-btn:hover {
+  background: var(--bg-hover);
+}
+
+.graph-floor-btn.active {
+  background: var(--accent, #58a6ff);
+  color: var(--bg);
+  border-color: var(--accent, #58a6ff);
+}
+
 .graph-canvas {
   flex: 1;
   width: 100%;

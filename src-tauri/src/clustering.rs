@@ -202,9 +202,9 @@ pub fn build_cluster_tree(
             break;
         }
 
-        // k = ceil(sqrt(current_count))、ただし最低2、最大max_top_clusters
+        // k = ceil(sqrt(current_count))、ただし最低2、最大5（深い階層を生成するため）
         let k = (current_count as f64).sqrt().ceil() as usize;
-        let k = k.max(2).min(current_count - 1);
+        let k = k.max(2).min(current_count - 1).min(5);
 
         // 現在のレベルのcentroidでk-meansを実行
         let vectors: Vec<Vec<f32>> = current_level.iter().map(|n| n.centroid.clone()).collect();

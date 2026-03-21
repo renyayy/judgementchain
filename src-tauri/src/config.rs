@@ -14,7 +14,7 @@ fn default_graph_backend() -> String {
 }
 
 fn default_max_top_clusters() -> usize {
-    8
+    2
 }
 
 fn default_max_system_memory_fraction() -> f64 {
