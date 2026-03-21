@@ -215,6 +215,83 @@ pub async fn call_gemini(
     Ok(acc)
 }
 
+/// テキスト生成用 Gemini API呼び出し（JSON形式ではなくプレーンテキストを返す）
+pub async fn call_gemini_text(
+    access_token: &str,
+    project_id: &str,
+    _location: &str,
+    model: &str,
+    prompt: &str,
+    max_output_tokens: u32,
+) -> Result<String, String> {
+    let url = format!(
+        "https://aiplatform.googleapis.com/v1/projects/{project_id}/locations/global/publishers/google/models/{model}:streamGenerateContent",
+        project_id = project_id,
+        model = model,
+    );
+
+    let request_body = GeminiRequest {
+        contents: vec![GeminiContent {
+            role: "user".to_string(),
+            parts: vec![GeminiPart {
+                text: prompt.to_string(),
+            }],
+        }],
+        generation_config: GenerationConfig {
+            response_mime_type: "text/plain".to_string(),
+            temperature: 0.1,
+            max_output_tokens,
+        },
+    };
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(&url)
+        .bearer_auth(access_token)
+        .json(&request_body)
+        .send()
+        .await
+        .map_err(|e| format!("Gemini API HTTPエラー: {}", e))?;
+
+    let status = resp.status();
+    let body_text = resp.text().await.unwrap_or_default();
+
+    if !status.is_success() {
+        return Err(format!("Gemini API失敗 ({}): {}", status, body_text));
+    }
+
+    let trimmed = body_text.trim_start();
+    let mut acc = String::new();
+
+    if trimmed.starts_with('[') {
+        let chunks: Vec<GeminiResponse> = serde_json::from_str(&body_text).map_err(|e| {
+            format!("Geminiレスポンスパースエラー(配列): {}", e)
+        })?;
+        for chunk in chunks {
+            if let Some(candidate) = chunk.candidates.into_iter().next() {
+                for part in candidate.content.parts {
+                    acc.push_str(&part.text);
+                }
+            }
+        }
+    } else {
+        let gemini_resp: GeminiResponse = serde_json::from_str(&body_text).map_err(|e| {
+            format!("Geminiレスポンスパースエラー(オブジェクト): {}", e)
+        })?;
+        for candidate in gemini_resp.candidates {
+            for part in candidate.content.parts {
+                acc.push_str(&part.text);
+            }
+        }
+    }
+
+    if acc.is_empty() {
+        return Err("Geminiからのレスポンスが空です".to_string());
+    }
+
+    Ok(acc)
+}
+
 /// JSON文字列からコードブロックを除去してパース用に正規化する
 pub fn clean_json_response(text: &str) -> &str {
     let text = text.trim();

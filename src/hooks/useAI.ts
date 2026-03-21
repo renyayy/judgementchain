@@ -39,8 +39,9 @@ export function useAI() {
     };
   }, []);
 
-  const loadModel = useCallback(async () => {
-    if (modelStatus === "loading" || modelStatus === "ready") return;
+  const loadModel = useCallback(async (forceReload: boolean = false) => {
+    if (modelStatus === "loading") return;
+    if (!forceReload && modelStatus === "ready") return;
     setModelStatus("loading");
     try {
       await invoke("load_model");

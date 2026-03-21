@@ -1,14 +1,37 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import type { ModelStatus, Message } from "../hooks/useAI";
+import { notify } from "../lib/notifications";
 
 interface AiChatPanelProps {
   modelStatus: ModelStatus;
   messages: Message[];
   isGenerating: boolean;
-  onLoadModel: () => void;
+  onLoadModel: (forceReload?: boolean) => Promise<void>;
   onGenerate: (prompt: string) => void;
   onClear: () => void;
 }
+
+const MODEL_OPTIONS = [
+  { value: "gemma-270m-gguf/gemma-3-270m-it-Q6_K.gguf", label: "Q6_K (Gemma 3 270m)" },
+  { value: "gemma-270m-gguf/gemma-3-270m-it-Q4_K_M.gguf", label: "Q4_K_M (Gemma 3 270m)" },
+  { value: "gemma-270m-gguf/gemma-3-270m-it-Q8_0.gguf", label: "Q8_0 (Gemma 3 270m)" },
+  { value: "gemma-270m-gguf/gemma-3-270m-it-F16.gguf", label: "F16 (Gemma 3 270m)" },
+  { value: "gemma-3-1b-it-q4_0.gguf", label: "q4_0 (Gemma 3 1B)" },
+] as const;
+
+const DEFAULT_MODEL_VALUE = MODEL_OPTIONS[0].value;
+
+const getFilename = (p: string) => {
+  const trimmed = p.trim();
+  if (!trimmed) return "";
+  const parts = trimmed.split(/[/\\]/);
+  return parts[parts.length - 1] ?? "";
+};
+
+const modelValueByFilename = new Map<string, string>(
+  MODEL_OPTIONS.map((o) => [getFilename(o.value), o.value]),
+);
 
 export function AiChatPanel({
   modelStatus,
@@ -23,11 +46,42 @@ export function AiChatPanel({
   const startX = useRef(0);
   const startWidth = useRef(width);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const [selectedModelPath, setSelectedModelPath] = useState(DEFAULT_MODEL_VALUE);
+  const [ignoreMemoryBudget, setIgnoreMemoryBudget] = useState(false);
+  const [savingModel, setSavingModel] = useState(false);
 
   // 新しいメッセージが来たら最下部にスクロール
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // 起動時に config.ai.model_path を読み、モデル選択を初期化
+  useEffect(() => {
+    let cancelled = false;
+    invoke<Record<string, unknown>>("get_config")
+      .then((cfg) => {
+        if (cancelled) return;
+        const ai = (cfg.ai as Record<string, unknown> | undefined) ?? undefined;
+        const performance = (cfg.performance as Record<string, unknown> | undefined) ?? undefined;
+        const raw = (ai?.model_path as string | undefined) ?? "";
+        if (!raw.trim()) {
+          setSelectedModelPath(DEFAULT_MODEL_VALUE);
+          return;
+        }
+        const matched = modelValueByFilename.get(getFilename(raw)) ?? "";
+        setSelectedModelPath(matched || DEFAULT_MODEL_VALUE);
+
+        const rawIgnore = performance?.ignore_memory_budget as boolean | undefined;
+        setIgnoreMemoryBudget(rawIgnore ?? false);
+      })
+      .catch((e) => {
+        console.error("get_config error:", e);
+        if (!cancelled) setSelectedModelPath(DEFAULT_MODEL_VALUE);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleResizeStart = (e: React.MouseEvent) => {
     startX.current = e.clientX;
@@ -43,6 +97,34 @@ export function AiChatPanel({
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
   };
+
+  const handleApplyModel = useCallback(async () => {
+    if (savingModel) return;
+    try {
+      setSavingModel(true);
+      const cfg = await invoke<Record<string, unknown>>("get_config");
+      const ai = (cfg.ai as Record<string, unknown> | undefined) ?? {};
+      const performance = (cfg.performance as Record<string, unknown> | undefined) ?? {};
+      const updated = {
+        ...cfg,
+        performance: {
+          ...performance,
+          ignore_memory_budget: ignoreMemoryBudget,
+        },
+        ai: {
+          ...ai,
+          model_path: selectedModelPath,
+        },
+      };
+      await invoke("update_config", { config: updated });
+      await onLoadModel(true);
+    } catch (e) {
+      console.error("apply model error:", e);
+      notify(`モデルの切り替えに失敗しました: ${e}`, "error");
+    } finally {
+      setSavingModel(false);
+    }
+  }, [onLoadModel, savingModel, selectedModelPath, ignoreMemoryBudget]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -82,26 +164,58 @@ export function AiChatPanel({
         )}
       </div>
 
-      {/* モデル未ロード時のロードボタン */}
-      {(modelStatus === "idle" || modelStatus === "error") && (
-        <div className="ai-load-area">
-          <p className="ai-load-desc">
-            {modelStatus === "error"
-              ? "モデルの読み込みに失敗しました。"
-              : "Gemma モデルをメモリに読み込みます。"}
+      {/* モデル選択（Q6_K をデフォルト表示） */}
+      <div className="ai-model-switch-area">
+        <div className="ai-model-switch-row">
+          <div className="ai-model-switch-label">モデル</div>
+          <select
+            className="ai-model-select"
+            value={selectedModelPath}
+            disabled={savingModel || modelStatus === "loading"}
+            onChange={(e) => setSelectedModelPath(e.target.value)}
+          >
+            {MODEL_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="ai-ignore-memory-row">
+          <label className="ai-ignore-memory-label">
+            <input
+              type="checkbox"
+              checked={ignoreMemoryBudget}
+              disabled={savingModel || modelStatus === "loading"}
+              onChange={(e) => setIgnoreMemoryBudget(e.target.checked)}
+            />
+            RAM上限を無視する（自己責任）
+          </label>
+          <p className="ai-ignore-memory-help">
+            True にするとロード前チェックと `RLIMIT_AS` を無効化します。OSに kill される可能性があります。
           </p>
-          <button className="ai-load-btn" onClick={onLoadModel}>
-            モデルをロード
+        </div>
+
+        <div className="ai-model-switch-actions">
+          {modelStatus === "loading" ? <div className="ai-loading-spinner" /> : <span />}
+          <button
+            className="ai-load-btn ai-model-apply-btn"
+            disabled={savingModel || modelStatus === "loading"}
+            onClick={handleApplyModel}
+          >
+            {modelStatus === "ready" ? "モデルを切替" : "選択したモデルでロード"}
           </button>
         </div>
-      )}
-
-      {modelStatus === "loading" && (
-        <div className="ai-load-area">
-          <div className="ai-loading-spinner" />
-          <p className="ai-load-desc">ロード中... (数秒かかります)</p>
-        </div>
-      )}
+        {modelStatus === "error" && (
+          <p className="ai-model-help">
+            モデルの読み込みに失敗しました。モデルを変更して再ロードしてください。
+          </p>
+        )}
+        <p className="ai-model-help">
+          初期値は `ai.model_path` が未設定の場合のデフォルト（現在は `Q6_K`）です。
+        </p>
+      </div>
 
       {/* メッセージ一覧 */}
       <div className="ai-messages">

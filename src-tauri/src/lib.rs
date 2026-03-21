@@ -24,9 +24,11 @@ pub struct AppState {
 impl AppState {
     pub fn new() -> Result<Self, String> {
         let config = Config::load();
-        crate::memory_budget::apply_optional_address_space_limit(
-            config.performance.max_system_memory_fraction,
-        );
+        if !config.performance.ignore_memory_budget {
+            crate::memory_budget::apply_optional_address_space_limit(
+                config.performance.max_system_memory_fraction,
+            );
+        }
         let db = Database::new()?;
         Ok(Self {
             config: Arc::new(RwLock::new(config)),
@@ -80,6 +82,8 @@ pub fn run() {
             commands::git_log,
             commands::git_show,
             commands::git_init,
+            commands::list_plugins,
+            commands::read_plugin_file,
             commands::embed_note,
             commands::get_similar_notes_for_margin,
             commands::get_model_path,

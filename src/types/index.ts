@@ -39,6 +39,7 @@ export interface Config {
   };
   performance?: {
     max_system_memory_fraction?: number;
+    ignore_memory_budget?: boolean;
   };
 }
 

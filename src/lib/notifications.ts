@@ -4,7 +4,10 @@ export interface Notification {
   id: string;
   type: NotificationType;
   message: string;
-  /** ms。0 = 手動で閉じるまで残る */
+  /**
+   * ms。0 = 手動で閉じるまで「表示」され続ける（履歴はアプリ終了まで保持）
+   * duration は「表示時間」であり、履歴の消去タイミングではありません。
+   */
   duration: number;
 }
 
@@ -18,10 +21,11 @@ export function subscribe(listener: Listener): () => void {
 }
 
 const DEFAULT_DURATION: Record<NotificationType, number> = {
-  info: 4000,
-  success: 4000,
-  warning: 6000,
-  error: 0,
+  // 約3秒で消す（"見えているトースト" の時間）
+  info: 3000,
+  success: 3000,
+  warning: 3000,
+  error: 3000,
 };
 
 export function notify(

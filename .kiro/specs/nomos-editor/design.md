@@ -593,6 +593,8 @@ update_debounce_ms = 500
 [performance]
 # 搭載物理メモリに対するプロセス仮想メモリ上限の割合（Unix: RLIMIT_AS）。0 以下で無効。
 max_system_memory_fraction = 0.8
+# 上限（ロード前チェック/RLIMIT_AS）を無視する。自己責任です（OSに kill される可能性あり）。
+ignore_memory_budget = false
 embedding_batch_size = 10  # 未実装（将来用）
 ```
 
