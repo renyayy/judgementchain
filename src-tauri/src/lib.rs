@@ -7,6 +7,7 @@ mod watcher;
 mod ai;
 mod bibtex;
 mod vertex_ai;
+mod graph_backend;
 mod memory_budget;
 mod terminal;
 

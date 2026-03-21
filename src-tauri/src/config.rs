@@ -9,6 +9,10 @@ fn default_vertex_model() -> String {
     "gemini-2.0-flash-001".to_string()
 }
 
+fn default_graph_backend() -> String {
+    "claude".to_string()
+}
+
 fn default_max_system_memory_fraction() -> f64 {
     0.8
 }
@@ -70,6 +74,8 @@ pub struct AiConfig {
     pub vertex_ai_location: String,
     #[serde(default = "default_vertex_model")]
     pub vertex_ai_model: String,
+    #[serde(default = "default_graph_backend")]
+    pub graph_backend: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -104,6 +110,7 @@ impl Default for Config {
                 vertex_ai_project_id: "".to_string(),
                 vertex_ai_location: default_vertex_location(),
                 vertex_ai_model: default_vertex_model(),
+                graph_backend: default_graph_backend(),
             },
             git: GitConfig {
                 enabled: false,

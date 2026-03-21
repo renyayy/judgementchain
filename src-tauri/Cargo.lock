@@ -2859,6 +2859,7 @@ dependencies = [
 name = "judgement-brain"
 version = "0.1.2"
 dependencies = [
+ "async-trait",
  "base64 0.22.1",
  "candle-core",
  "candle-nn",

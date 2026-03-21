@@ -45,6 +45,7 @@ hf-hub = "0.4"
 sysinfo = { version = "0.33", default-features = false, features = ["system"] }
 libc = "0.2"
 portable-pty = "0.8"
+async-trait = "0.1"
 
 [features]
 default = []

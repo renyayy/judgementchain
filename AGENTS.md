@@ -1,58 +1,136 @@
-# AI Agents 運用ルール（このリポジトリ）
+# CLAUDE.md
 
-このドキュメントは、AIエージェントが本リポジトリで開発を進めるための **共通運用ルール** です。  
-個別機能の詳細は `.kiro/specs/<feature>/` を参照し、常に **Spec駆動**（Requirements → Design → Tasks → Implementation）で進めます。
-
----
-
-## 基本原則
-
-- **ローカルファースト**: 仕様・設計で定義された通り、外部依存を最小化し、データ所有権・プライバシーを最優先する。
-- **Specが単一の正**: 実装判断の最優先は `.kiro/specs/` の仕様。矛盾があればSpecを更新する（勝手に実装で解釈しない）。
-- **段階ゲートを飛ばさない**: 要件が未承認なら設計に進まない／設計が未承認ならタスク化に進まない。
-- **小さく確実に**: PR/コミットは小さく、差分の理由が追える単位にする。
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ---
 
-## 作業フロー（Kiro / Spec Driven）
+## ビルド・開発コマンド
 
-### 1) 現在のSpec確認
-- `.kiro/specs/` を確認し、対象機能の `requirements.md` / `design.md` の状態を把握する
-- 必要なら `spec-status` 相当の確認を行う（本リポジトリの運用に従う）
+```bash
+# 開発サーバー起動（Tauri + Vite）
+bun tauri dev
 
-### 2) タスク化
-- `.kiro/specs/<feature>/tasks.md`（存在する場合）に、Designの「Phase / 依存関係 / 受け入れ基準」をトレースできる形でタスク分解する
-- リポジトリ全体の進捗は `TASKS.md` を単一のボードとして更新する（後述）
+# プロダクションビルド
+bun tauri build --config src-tauri/tauri.release.conf.json
 
-### 3) 実装
-- 変更は「要件・設計のどこを満たすか」を `TASKS.md` の該当行に紐付ける
-- 破壊的変更や大規模リファクタは、まずDesign側に代替案とトレードオフを追記してから着手する
+# フロントエンドのみビルド
+bun run build
 
-### 4) 検証
-- 可能な範囲で最小の再現・検証（lint / unit）を行う
-- 既存エラーの「巻き込み修正」は原則しない（必要なら別タスク化）
+# Rustのみビルド確認
+cd src-tauri && cargo build
+
+# Rustの型チェック（ビルドより高速）
+cd src-tauri && cargo check
+
+# 環境確認
+bun tauri info
+```
+
+ツールチェーン管理は `mise.toml`（bun latest, rust latest）。`MACOSX_DEPLOYMENT_TARGET=10.15`。
+
+Rustのplatform features: macOSは `metal`、Linuxは `cuda` が利用可能（`Cargo.toml` の `[features]`）。
+
+テスト・lint・CIは未整備（eslint/biome/clippy/GitHub Actions なし）。
 
 ---
 
-## コミュニケーション規約
+## アーキテクチャ
+
+Tauri v2 デスクトップアプリ。Rustバックエンド + React/TypeScriptフロントエンド。
+
+### データフロー
+
+```
+Frontend → invoke() → Tauri Command → Backend（同期/非同期）
+Backend  → emit()   → Event        → Frontend listener（listen()）
+```
+
+フロントエンドからの操作は `@tauri-apps/api` の `invoke()` でRustコマンドを呼び出し、バックエンドからの非同期通知は `listen()` でイベントを受け取る。
+
+### バックエンド（`src-tauri/src/`）
+
+| モジュール | 役割 |
+|---|---|
+| `lib.rs` | AppState定義、Tauriコマンド登録（35+コマンド）、プラグイン設定 |
+| `commands.rs` | Tauriコマンド実装（ファイル操作、AI、Git、グラフ分析） |
+| `config.rs` | `~/.config/nomos/config.toml` の読み書き |
+| `database.rs` | SQLite操作（embedding保存・類似検索、活動ログ、週次サマリ） |
+| `vault.rs` | Vault内ファイル一覧・読み書き |
+| `ai.rs` | Ollama連携（embedding生成、Gemma推論） |
+| `vertex_ai.rs` | Vertex AI (Gemini API) JWT認証・呼び出し |
+| `bibtex.rs` | BibTeXパース・論文紐付け |
+| `git.rs` | gitoxide連携（status, stage, commit, log, diff） |
+| `watcher.rs` | ファイル変更監視（notify crate） |
+| `terminal.rs` | PTY端末（portable-pty + xterm.js） |
+| `memory_budget.rs` | メモリ使用量制限 |
+
+**AppState**（`lib.rs`）: `Arc<RwLock<Config>>`, `Arc<Database>`, `Arc<Mutex<Option<CandleState>>>` を保持。
+
+### フロントエンド（`src/`）
+
+グローバルstate管理ライブラリ（Redux/Zustand/Context）は未使用。すべてReact hooksでローカル管理。設定は `localStorage` に永続化。
+
+#### 主要コンポーネント（`src/components/`）
+
+| ファイル | 役割 |
+|---|---|
+| `App.tsx` | メインレイアウト（サイドバー、エディタペイン、右パネル、ターミナル） |
+| `Editor.tsx` | CodeMirror 6エディタ |
+| `EditorPane.tsx` | タブ管理 |
+| `MarginPanel.tsx` | Judgement Brain マージン注釈UI |
+| `GraphPanel.tsx` | Cytoscape.jsグラフ可視化 |
+| `GitPanel.tsx` / `GitDiff.tsx` | Git操作UI |
+| `AiChatPanel.tsx` | AIチャットインターフェース |
+| `TerminalPanel.tsx` | PTYターミナル |
+| `SettingsPanel.tsx` | 設定画面 |
+
+#### Hooks（`src/hooks/`）
+
+| フック | 役割 |
+|---|---|
+| `useVault.ts` | ファイル操作（一覧・開く・保存・作成・削除・リネーム） |
+| `useGit.ts` | Git操作 |
+| `useAI.ts` | LLM連携（モデル読込・テキスト生成・イベントストリーミング） |
+| `useSettings.ts` | localStorage永続化設定（テーマ、フォントサイズ） |
+| `useGraphAnalysis.ts` | グラフ分析 |
+| `useNotifications.ts` | トースト通知 |
+| `useAppMenu.ts` | アプリメニュー連携 |
+
+#### CodeMirror拡張（`src/extensions/`）
+
+- `wikilinks.ts` — `[[link]]` 構文のデコレーションプラグイン
+- `wordCompletion.ts` — 単語補完
+
+### AIアーキテクチャ（3層構造）
+
+```
+Layer 1: Embedding（常時） — nomic-embed-text、保存のたびにベクトル化、マージン注釈の類似検索
+Layer 2: 1B推論（バックグラウンド） — Gemma 3 1B (CPU)、矛盾検出・論文紐付け・週次サマリ
+Layer 3: 拡張推論（ユーザー設定） — Ollama経由で大型モデル、Vertex AI (Gemini) でグラフ分析
+```
+
+**設計判断**: リアルタイム注釈はembeddingのみ、LLM推論はブロッキングしない。
+
+### DB設計（SQLite `~/.local/share/nomos/nomos.db`）
+
+- `note_embeddings` — ファイルパス、768次元ベクトル（BLOB）、コンテンツハッシュ
+- `activity_log` — ファイルパス、アクション、タイムスタンプ、滞在時間
+- `weekly_summaries` — 週識別子、サマリ内容、生成日時
+- `wikilinks` — ソース、ターゲット、broken フラグ
+- `contradiction_cache` — JSON結果、1時間TTL
+
+---
+
+## 運用ルール
 
 - **回答言語**: 日本語
-- **記述スタイル**:
-  - 重要事項は **太字** で明示
-  - ファイル名・関数名・ディレクトリはバッククォートで囲う（例: `src-tauri/src/ai/`）
-- **不明点が出た場合**: 実装で補完せず、まずSpecに「未決定事項 / Open Questions」として記録する
+- **ローカルファースト**: 外部依存を最小化し、データ所有権・プライバシーを最優先
+- **小さく確実に**: PR/コミットは小さく、差分の理由が追える単位にする。
+- **不明点が出た場合**: 実装で補完せず、`.issues/` に記録する。
+- **コミットメッセージ**: 短く（例: `feat: add vault watcher` / `fix: resolve 429 error`）。`docs:` / `feat:` / `fix:` / `refactor:` を使い分ける
 
----
+## 課題管理
 
-## コミット運用
-
-- **コミットメッセージは短く**（例: `docs: add task board` / `feat: add vault watcher`）
-- 仕様・設計・タスクの更新は `docs:` でまとめ、実装は `feat:` / `fix:` / `refactor:` を使う
-
----
-
-## タスク管理（単一ソース）
-
-- リポジトリ全体の進捗は `TASKS.md` を **唯一のタスクボード** とする
-- `.kiro/specs/<feature>/` の詳細タスクが増える場合でも、`TASKS.md` 側に「参照リンク」と「状態」だけは必ず載せる
-
+- `.issues/` に1ファイル1課題で管理（問題＋やることを1ファイルに記述）
+- `.issues/editor/` にエディタ関連の課題
+- 変更は「どのissueを解決するか」を明示する

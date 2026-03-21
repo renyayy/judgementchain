@@ -1173,10 +1173,13 @@ pub async fn analyze_vault_for_graph(
     dir_path: String,
     state: State<'_, AppState>,
 ) -> Result<GraphData, String> {
-    // 設定から Vertex AI 情報を取得
-    let (sa_json, project_id, location, model) = {
+    // グラフ分析バックエンドを選択
+    use crate::graph_backend::{GraphBackend, ClaudeCliBackend, VertexAiBackend};
+
+    let (graph_backend_name, sa_json, project_id, location, model) = {
         let config = state.config.read().map_err(|e| format!("Config lock error: {}", e))?;
         (
+            config.ai.graph_backend.clone(),
             config.ai.vertex_ai_service_account_json.clone(),
             config.ai.vertex_ai_project_id.clone(),
             config.ai.vertex_ai_location.clone(),
@@ -1184,13 +1187,19 @@ pub async fn analyze_vault_for_graph(
         )
     };
 
-    eprintln!("[graph] project_id='{}', sa_json.len={}, sa_json.is_empty={}", project_id, sa_json.len(), sa_json.is_empty());
-    if sa_json.is_empty() || project_id.is_empty() {
-        return Err("Vertex AI設定が不完全です。Graphパネルの⚙設定からサービスアカウントJSONとプロジェクトIDを設定してください。".to_string());
-    }
-
-    // アクセストークン取得
-    let access_token = crate::vertex_ai::get_access_token(&sa_json).await?;
+    let backend: Box<dyn GraphBackend> = match graph_backend_name.as_str() {
+        "vertex_ai" => {
+            if sa_json.is_empty() || project_id.is_empty() {
+                return Err("Vertex AI設定が不完全です。Graphパネルの⚙設定からサービスアカウントJSONとプロジェクトIDを設定してください。".to_string());
+            }
+            let access_token = crate::vertex_ai::get_access_token(&sa_json).await?;
+            Box::new(VertexAiBackend { access_token, project_id, location, model })
+        }
+        _ => {
+            eprintln!("[graph] backend: claude CLI");
+            Box::new(ClaudeCliBackend)
+        }
+    };
 
     // .md ファイル一覧を収集（最大30件）
     let expanded_dir = crate::config::expand_tilde(&dir_path);
@@ -1199,6 +1208,10 @@ pub async fn analyze_vault_for_graph(
     for entry in walkdir::WalkDir::new(&expanded_dir)
         .follow_links(false)
         .into_iter()
+        .filter_entry(|e| {
+            // 隠しディレクトリ(.git, .obsidian等)をスキップ
+            e.file_name().to_str().map_or(true, |name| !name.starts_with('.'))
+        })
         .filter_map(|e| e.ok())
     {
         if entry.file_type().is_file() {
@@ -1238,11 +1251,11 @@ pub async fn analyze_vault_for_graph(
             prompt.push_str(&format!("(フルパス: {})\n\n", path));
         }
 
-        let response = crate::vertex_ai::call_gemini(&access_token, &project_id, &location, &model, &prompt).await?;
-        let cleaned = crate::vertex_ai::clean_json_response(&response);
+        let response = backend.query(&prompt).await?;
+        let cleaned = crate::vertex_ai::clean_json_response_owned(&response);
 
-        let entries: Vec<KeywordEntry> = serde_json::from_str(cleaned)
-            .map_err(|e| format!("キーワード抽出レスポンスパースエラー: {} / レスポンス: {}", e, cleaned))?;
+        let entries: Vec<KeywordEntry> = serde_json::from_str(&cleaned)
+            .map_err(|e| format!("キーワード抽出レスポンスパースエラー: {} / レスポンス: {}", e, &cleaned))?;
 
         for entry in entries {
             keyword_map.insert(entry.path, entry.keywords);
@@ -1273,11 +1286,11 @@ pub async fn analyze_vault_for_graph(
         kw_list_str
     );
 
-    let group_response = crate::vertex_ai::call_gemini(&access_token, &project_id, &location, &model, &group_prompt).await?;
-    let group_cleaned = crate::vertex_ai::clean_json_response(&group_response);
+    let group_response = backend.query(&group_prompt).await?;
+    let group_cleaned = crate::vertex_ai::clean_json_response_owned(&group_response);
 
-    let groups: Vec<GroupEntry> = serde_json::from_str(group_cleaned)
-        .map_err(|e| format!("グループ化レスポンスパースエラー: {} / レスポンス: {}", e, group_cleaned))?;
+    let groups: Vec<GroupEntry> = serde_json::from_str(&group_cleaned)
+        .map_err(|e| format!("グループ化レスポンスパースエラー: {} / レスポンス: {}", e, &group_cleaned))?;
 
     // Phase 3: 2トップグループへの集約＋ラベリング（1コール）
     let mut groups_str = String::from("[");
@@ -1305,10 +1318,10 @@ pub async fn analyze_vault_for_graph(
         groups_str
     );
 
-    let hierarchy_response = crate::vertex_ai::call_gemini(&access_token, &project_id, &location, &model, &hierarchy_prompt).await?;
-    let hierarchy_cleaned = crate::vertex_ai::clean_json_response(&hierarchy_response);
+    let hierarchy_response = backend.query(&hierarchy_prompt).await?;
+    let hierarchy_cleaned = crate::vertex_ai::clean_json_response_owned(&hierarchy_response);
 
-    let hierarchy: HierarchyResult = serde_json::from_str(hierarchy_cleaned)
+    let hierarchy: HierarchyResult = serde_json::from_str(&hierarchy_cleaned)
         .map_err(|e| format!("階層化レスポンスパースエラー: {} / レスポンス: {}", e, hierarchy_cleaned))?;
 
     // グラフデータを構築
