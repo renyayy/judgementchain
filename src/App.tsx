@@ -38,6 +38,7 @@ function App() {
   const [rightPanel, setRightPanel] = useState<"git" | "ai" | "graph" | "margin" | null>("margin");
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [terminalHeight, setTerminalHeight] = useState(220);
+  const [rightPanelWidth, setRightPanelWidth] = useState(320);
   const [vaultName, setVaultName] = useState("");
 
   const toggleRightPanel = (panel: "git" | "ai" | "graph" | "margin") => {
@@ -207,6 +208,24 @@ function App() {
   }, [getPane, saveFile, setPane]);
 
   // ---- terminal ---------------------------------------------------------------
+
+  const handleRightPanelResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = rightPanelWidth;
+    document.body.classList.add("resizing");
+    const onMove = (ev: MouseEvent) => {
+      const maxWidth = Math.floor(window.innerWidth * 0.5);
+      setRightPanelWidth(Math.max(180, Math.min(maxWidth, startWidth - (ev.clientX - startX))));
+    };
+    const onUp = () => {
+      document.body.classList.remove("resizing");
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }, [rightPanelWidth]);
 
   const handleTerminalResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -515,42 +534,47 @@ function App() {
           )}
         </main>
 
-        {rightPanel === "git" && (
-          <GitPanel
-            status={gitStatus}
-            commits={gitCommits}
-            onRefresh={refreshGit}
-            onStage={gitStage}
-            onUnstage={gitUnstage}
-            onCommit={gitCommit}
-            onInit={gitInit}
-            onDiscard={gitDiscard}
-            onOpenDiff={handleOpenDiff}
-            onOpenCommit={handleOpenCommit}
-          />
-        )}
-        {rightPanel === "ai" && (
-          <AiChatPanel
-            modelStatus={modelStatus}
-            messages={messages}
-            isGenerating={isGenerating}
-            onLoadModel={loadModel}
-            onGenerate={generateText}
-            onClear={clearMessages}
-          />
-        )}
-        {rightPanel === "graph" && (
-          <GraphPanel
-            vaultPath={vaultPath}
-            onOpenFile={handleSelectFile}
-          />
-        )}
-        {rightPanel === "margin" && (
-          <MarginPanel
-            annotations={activeTab?.annotations ?? []}
-            backlinks={activeTab?.backlinks ?? []}
-            onOpenNote={handleOpenNote}
-          />
+        {rightPanel && (
+          <div className="right-panel-wrapper" style={{ width: rightPanelWidth, minWidth: rightPanelWidth }}>
+            <div className="right-panel-resize-handle" onMouseDown={handleRightPanelResizeStart} />
+            {rightPanel === "git" && (
+              <GitPanel
+                status={gitStatus}
+                commits={gitCommits}
+                onRefresh={refreshGit}
+                onStage={gitStage}
+                onUnstage={gitUnstage}
+                onCommit={gitCommit}
+                onInit={gitInit}
+                onDiscard={gitDiscard}
+                onOpenDiff={handleOpenDiff}
+                onOpenCommit={handleOpenCommit}
+              />
+            )}
+            {rightPanel === "ai" && (
+              <AiChatPanel
+                modelStatus={modelStatus}
+                messages={messages}
+                isGenerating={isGenerating}
+                onLoadModel={loadModel}
+                onGenerate={generateText}
+                onClear={clearMessages}
+              />
+            )}
+            {rightPanel === "graph" && (
+              <GraphPanel
+                vaultPath={vaultPath}
+                onOpenFile={handleSelectFile}
+              />
+            )}
+            {rightPanel === "margin" && (
+              <MarginPanel
+                annotations={activeTab?.annotations ?? []}
+                backlinks={activeTab?.backlinks ?? []}
+                onOpenNote={handleOpenNote}
+              />
+            )}
+          </div>
         )}
         </div>{/* app-body-main */}
         <TerminalPanel

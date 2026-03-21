@@ -1,4 +1,3 @@
-import { useState, useRef } from "react";
 import type { MarginAnnotation, Backlink } from "../types";
 
 interface MarginPanelProps {
@@ -16,36 +15,8 @@ const ICON_MAP: Record<string, string> = {
 };
 
 export function MarginPanel({ annotations, backlinks, onOpenNote }: MarginPanelProps) {
-  const [width, setWidth] = useState(260);
-  const isDragging = useRef(false);
-  const startX = useRef(0);
-  const startWidth = useRef(0);
-
-  const handleResizeStart = (e: React.MouseEvent) => {
-    e.preventDefault();
-    isDragging.current = true;
-    startX.current = e.clientX;
-    startWidth.current = width;
-    document.body.classList.add("resizing");
-
-    const onMouseMove = (e: MouseEvent) => {
-      if (!isDragging.current) return;
-      const next = Math.max(180, Math.min(480, startWidth.current - (e.clientX - startX.current)));
-      setWidth(next);
-    };
-    const onMouseUp = () => {
-      isDragging.current = false;
-      document.body.classList.remove("resizing");
-      window.removeEventListener("mousemove", onMouseMove);
-      window.removeEventListener("mouseup", onMouseUp);
-    };
-    window.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("mouseup", onMouseUp);
-  };
-
   return (
-    <aside className="margin-panel" style={{ width, minWidth: width }}>
-      <div className="margin-panel-resize-handle" onMouseDown={handleResizeStart} />
+    <aside className="margin-panel">
       <div className="margin-panel-section">
         <h3 className="margin-section-title">Judgement Brain</h3>
 

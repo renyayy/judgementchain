@@ -44,12 +44,6 @@ export default function GraphPanel({ vaultPath, onOpenFile }: GraphPanelProps) {
   const [saveMsg, setSaveMsg] = useState("");
   const [graphBackend, setGraphBackend] = useState("claude");
 
-  // リサイズ
-  const [width, setWidth] = useState(420);
-  const isDragging = useRef(false);
-  const startX = useRef(0);
-  const startWidth = useRef(420);
-
   // マウント時に設定を読み込む
   useEffect(() => {
     invoke<Record<string, unknown>>("get_config").then((cfg) => {
@@ -91,26 +85,6 @@ export default function GraphPanel({ vaultPath, onOpenFile }: GraphPanelProps) {
       setSavingConfig(false);
     }
   }, [settings]);
-
-  const handleResizeStart = (e: React.MouseEvent) => {
-    e.preventDefault();
-    isDragging.current = true;
-    startX.current = e.clientX;
-    startWidth.current = width;
-    document.body.classList.add("resizing");
-    const onMouseMove = (e: MouseEvent) => {
-      if (!isDragging.current) return;
-      setWidth(Math.max(200, Math.min(700, startWidth.current - (e.clientX - startX.current))));
-    };
-    const onMouseUp = () => {
-      isDragging.current = false;
-      document.body.classList.remove("resizing");
-      window.removeEventListener("mousemove", onMouseMove);
-      window.removeEventListener("mouseup", onMouseUp);
-    };
-    window.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("mouseup", onMouseUp);
-  };
 
   // Cytoscapeグラフの初期化・更新
   const buildGraph = useCallback((graphData: GraphData) => {
@@ -280,8 +254,7 @@ export default function GraphPanel({ vaultPath, onOpenFile }: GraphPanelProps) {
   const dirName = vaultPath.split("/").filter(Boolean).pop() ?? vaultPath;
 
   return (
-    <div className="graph-panel" style={{ width }}>
-      <div className="margin-panel-resize-handle" onMouseDown={handleResizeStart} />
+    <div className="graph-panel">
       <div className="graph-panel-header">
         <span className="graph-panel-title">Graph</span>
         <span className="graph-panel-dir" title={vaultPath}>📁 {dirName}</span>

@@ -18,31 +18,13 @@ export function AiChatPanel({
   onGenerate,
   onClear,
 }: AiChatPanelProps) {
-  const [width, setWidth] = useState(320);
   const [input, setInput] = useState("");
-  const startX = useRef(0);
-  const startWidth = useRef(width);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // 新しいメッセージが来たら最下部にスクロール
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
-
-  const handleResizeStart = (e: React.MouseEvent) => {
-    startX.current = e.clientX;
-    startWidth.current = width;
-    const onMove = (ev: MouseEvent) => {
-      const delta = startX.current - ev.clientX;
-      setWidth(Math.max(240, Math.min(600, startWidth.current + delta)));
-    };
-    const onUp = () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -67,8 +49,7 @@ export function AiChatPanel({
   };
 
   return (
-    <aside className="ai-chat-panel" style={{ width, minWidth: width }}>
-      <div className="margin-panel-resize-handle" onMouseDown={handleResizeStart} />
+    <aside className="ai-chat-panel">
 
       <div className="ai-chat-header">
         <span className="ai-chat-title">AI (Gemma)</span>

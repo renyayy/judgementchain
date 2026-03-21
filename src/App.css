@@ -1054,17 +1054,17 @@ body.resizing * {
 }
 
 /* Margin Panel */
-.margin-panel {
-  background: var(--bg-secondary);
-  border-left: 1px solid var(--border);
+/* ── Right Panel Wrapper (unified resize) ─────────────────────────────── */
+.right-panel-wrapper {
+  position: relative;
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
   flex-shrink: 0;
-  position: relative;
+  height: 100%;
+  overflow: hidden;
 }
 
-.margin-panel-resize-handle {
+.right-panel-resize-handle {
   position: absolute;
   top: 0;
   left: -3px;
@@ -1074,10 +1074,21 @@ body.resizing * {
   z-index: 10;
 }
 
-.margin-panel-resize-handle:hover,
-.margin-panel-resize-handle:active {
+.right-panel-resize-handle:hover,
+.right-panel-resize-handle:active {
   background: var(--accent);
   opacity: 0.5;
+}
+
+.margin-panel {
+  background: var(--bg-secondary);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  flex: 1;
+  width: 100%;
+  position: relative;
 }
 
 .margin-panel::-webkit-scrollbar {
@@ -1236,22 +1247,8 @@ body.resizing * {
   font-size: 12px;
   color: var(--text-primary);
   position: relative;
-}
-
-.git-panel-resize-handle {
-  position: absolute;
-  top: 0;
-  left: -3px;
-  width: 6px;
-  height: 100%;
-  cursor: col-resize;
-  z-index: 10;
-}
-
-.git-panel-resize-handle:hover,
-.git-panel-resize-handle:active {
-  background: var(--accent);
-  opacity: 0.5;
+  flex: 1;
+  width: 100%;
 }
 
 .git-panel-header {
@@ -1502,7 +1499,8 @@ body.resizing * {
   border-left: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  flex-shrink: 0;
+  flex: 1;
+  width: 100%;
   position: relative;
   overflow: hidden;
 }
@@ -1861,7 +1859,8 @@ body.resizing * {
   background: var(--bg-secondary);
   border-left: 1px solid var(--border);
   position: relative;
-  flex-shrink: 0;
+  flex: 1;
+  width: 100%;
 }
 
 .graph-panel-header {
