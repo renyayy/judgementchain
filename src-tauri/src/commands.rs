@@ -604,6 +604,53 @@ pub async fn get_weekly_summary(state: State<'_, AppState>) -> Result<Option<Str
     state.db.get_weekly_summary(current_week_start())
 }
 
+/// 設定の `ai.backend` に応じて短いテキストを生成する（Vertex 設定があれば Gemini、なければ Candle）。
+async fn generate_with_backend(
+    state: &State<'_, AppState>,
+    prompt: &str,
+    max_tokens: u32,
+) -> Result<String, String> {
+    let (backend, sa_json, project_id, location, model) = {
+        let config = state.config.read().map_err(|e| format!("Config lock error: {}", e))?;
+        (
+            config.ai.backend.clone(),
+            config.ai.vertex_ai_service_account_json.clone(),
+            config.ai.vertex_ai_project_id.clone(),
+            config.ai.vertex_ai_location.clone(),
+            config.ai.vertex_ai_model.clone(),
+        )
+    };
+
+    let use_vertex = (backend == "vertex" || backend == "vertex_ai")
+        && !sa_json.is_empty()
+        && !project_id.is_empty();
+
+    if use_vertex {
+        let token = crate::vertex_ai::get_access_token(&sa_json).await?;
+        return crate::vertex_ai::call_gemini_text(
+            &token,
+            &project_id,
+            &location,
+            &model,
+            prompt,
+            max_tokens,
+        )
+        .await;
+    }
+
+    let candle_arc = std::sync::Arc::clone(&state.candle);
+    let prompt_owned = prompt.to_string();
+    tokio::task::spawn_blocking(move || {
+        let mut guard = candle_arc.lock().map_err(|e| format!("ロックエラー: {}", e))?;
+        let candle = guard.as_mut().ok_or_else(|| {
+            "モデル未ロード。先に AI (Gemma) パネルでモデルをロードしてください".to_string()
+        })?;
+        candle.generate(&prompt_owned, max_tokens, |_| {})
+    })
+    .await
+    .map_err(|e| format!("タスクエラー: {}", e))?
+}
+
 /// Candle を使って今週のサマリを生成・保存する。
 #[tauri::command]
 pub async fn generate_weekly_summary(state: State<'_, AppState>) -> Result<String, String> {

@@ -20,7 +20,9 @@ const MODEL_OPTIONS = [
   { value: "gemma-3-1b-it-q4_0.gguf", label: "q4_0 (Gemma 3 1B)" },
 ] as const;
 
-const DEFAULT_MODEL_VALUE = MODEL_OPTIONS[0].value;
+type ModelPath = (typeof MODEL_OPTIONS)[number]["value"];
+
+const DEFAULT_MODEL_VALUE: ModelPath = MODEL_OPTIONS[0].value;
 
 const getFilename = (p: string) => {
   const trimmed = p.trim();
@@ -29,7 +31,7 @@ const getFilename = (p: string) => {
   return parts[parts.length - 1] ?? "";
 };
 
-const modelValueByFilename = new Map<string, string>(
+const modelValueByFilename = new Map<string, ModelPath>(
   MODEL_OPTIONS.map((o) => [getFilename(o.value), o.value]),
 );
 
@@ -46,7 +48,7 @@ export function AiChatPanel({
   const startX = useRef(0);
   const startWidth = useRef(width);
   const bottomRef = useRef<HTMLDivElement>(null);
-  const [selectedModelPath, setSelectedModelPath] = useState(DEFAULT_MODEL_VALUE);
+  const [selectedModelPath, setSelectedModelPath] = useState<ModelPath>(DEFAULT_MODEL_VALUE);
   const [ignoreMemoryBudget, setIgnoreMemoryBudget] = useState(false);
   const [savingModel, setSavingModel] = useState(false);
 
@@ -68,8 +70,8 @@ export function AiChatPanel({
           setSelectedModelPath(DEFAULT_MODEL_VALUE);
           return;
         }
-        const matched = modelValueByFilename.get(getFilename(raw)) ?? "";
-        setSelectedModelPath(matched || DEFAULT_MODEL_VALUE);
+        const matched = modelValueByFilename.get(getFilename(raw));
+        setSelectedModelPath(matched ?? DEFAULT_MODEL_VALUE);
 
         const rawIgnore = performance?.ignore_memory_budget as boolean | undefined;
         setIgnoreMemoryBudget(rawIgnore ?? false);
@@ -172,7 +174,7 @@ export function AiChatPanel({
             className="ai-model-select"
             value={selectedModelPath}
             disabled={savingModel || modelStatus === "loading"}
-            onChange={(e) => setSelectedModelPath(e.target.value)}
+            onChange={(e) => setSelectedModelPath(e.target.value as ModelPath)}
           >
             {MODEL_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>

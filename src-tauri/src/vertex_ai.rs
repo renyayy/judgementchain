@@ -78,6 +78,21 @@ struct GenerationConfig {
     max_output_tokens: u32,
 }
 
+/// JSON 強制なし（プレーンテキスト応答向け）
+#[derive(Debug, Serialize)]
+struct GenerationConfigPlain {
+    temperature: f32,
+    #[serde(rename = "maxOutputTokens")]
+    max_output_tokens: u32,
+}
+
+#[derive(Debug, Serialize)]
+struct GeminiTextRequest {
+    contents: Vec<GeminiContent>,
+    #[serde(rename = "generationConfig")]
+    generation_config: GenerationConfigPlain,
+}
+
 #[derive(Debug, Deserialize)]
 struct GeminiResponse {
     candidates: Vec<GeminiCandidate>,
@@ -197,6 +212,97 @@ pub async fn call_gemini(
 
     // `streamGenerateContent` は chunk 配列（JSON array）として返ってくることがあるため、
     // 受け取ったレスポンスが配列/オブジェクトどちらでもパースできるようにする。
+    let trimmed = body_text.trim_start();
+    let mut acc = String::new();
+
+    if trimmed.starts_with('[') {
+        let chunks: Vec<GeminiResponse> = serde_json::from_str(&body_text).map_err(|e| {
+            format!(
+                "Geminiレスポンスパースエラー(配列): {} / レスポンス: {}",
+                e, body_text
+            )
+        })?;
+
+        for chunk in chunks {
+            if let Some(candidate) = chunk.candidates.into_iter().next() {
+                for part in candidate.content.parts {
+                    acc.push_str(&part.text);
+                }
+            }
+        }
+    } else {
+        let gemini_resp: GeminiResponse = serde_json::from_str(&body_text).map_err(|e| {
+            format!(
+                "Geminiレスポンスパースエラー(オブジェクト): {} / レスポンス: {}",
+                e, body_text
+            )
+        })?;
+
+        for candidate in gemini_resp.candidates {
+            for part in candidate.content.parts {
+                acc.push_str(&part.text);
+            }
+        }
+    }
+
+    if acc.is_empty() {
+        return Err("Geminiからのレスポンスが空です".to_string());
+    }
+
+    Ok(acc)
+}
+
+/// プレーンテキスト生成（週次サマリ等）。`responseMimeType` は付与しない。
+pub async fn call_gemini_text(
+    access_token: &str,
+    project_id: &str,
+    _location: &str,
+    model: &str,
+    prompt: &str,
+    max_output_tokens: u32,
+) -> Result<String, String> {
+    let url = format!(
+        "https://aiplatform.googleapis.com/v1/projects/{project_id}/locations/global/publishers/google/models/{model}:streamGenerateContent",
+        project_id = project_id,
+        model = model,
+    );
+
+    let request_body = GeminiTextRequest {
+        contents: vec![GeminiContent {
+            role: "user".to_string(),
+            parts: vec![GeminiPart {
+                text: prompt.to_string(),
+            }],
+        }],
+        generation_config: GenerationConfigPlain {
+            temperature: 0.2,
+            max_output_tokens: max_output_tokens.max(1).min(8192),
+        },
+    };
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(&url)
+        .bearer_auth(access_token)
+        .json(&request_body)
+        .send()
+        .await
+        .map_err(|e| format!("Gemini API HTTPエラー: {}", e))?;
+
+    let status = resp.status();
+    let body_text = resp.text().await.unwrap_or_default();
+
+    if vertex_ai_stderr_dump_raw_body_enabled() {
+        eprintln!(
+            "--- GEMINI RAW RESPONSE START ---\n{}\n--- GEMINI RAW RESPONSE END ---",
+            body_text
+        );
+    }
+
+    if !status.is_success() {
+        return Err(format!("Gemini API失敗 ({}): {}", status, body_text));
+    }
+
     let trimmed = body_text.trim_start();
     let mut acc = String::new();
 
