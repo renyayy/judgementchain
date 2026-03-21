@@ -283,6 +283,7 @@ export default function GraphPanel({ vaultPath, onOpenFile }: GraphPanelProps) {
       const levels = getTotalLevels(data);
       setTotalLevels(levels);
       const filtered = filterByMode(data, viewMode, selectedFloor);
+      if (filtered.nodes.length === 0) return;
       buildGraph(filtered);
     }
     return () => {

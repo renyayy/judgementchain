@@ -1158,16 +1158,17 @@ fn cluster_tree_to_graph_data(tree: &crate::clustering::ClusterTree) -> GraphDat
         }
     }
 
-    // 同一レベルのノード間で類似エッジを生成
-    let similarity_threshold = 0.5f32;
-    for level in &tree.levels {
+    // 同一レベルのノード間で類似エッジを生成（ファイルレベルは閾値を高くする）
+    for (level_idx, level) in tree.levels.iter().enumerate() {
         if level.len() < 2 { continue; }
+        // ファイルレベル(0)はペア数が多いため閾値を高く設定
+        let similarity_threshold = if level_idx == 0 { 0.7f32 } else { 0.5f32 };
+        // ファイルレベルで100件以上はエッジ生成をスキップ（O(n²)回避）
+        if level_idx == 0 && level.len() > 100 { continue; }
         for i in 0..level.len() {
             for j in (i + 1)..level.len() {
                 let sim = crate::clustering::cosine_similarity(&level[i].centroid, &level[j].centroid);
                 if sim >= similarity_threshold {
-                    let level_idx = tree.levels.iter().position(|l| std::ptr::eq(l, level)).unwrap_or(0);
-                    let graph_level = (level_idx + 1) as u32;
                     edges.push(GraphEdgeData {
                         id: format!("e{}", edge_counter),
                         source: level[i].id.clone(),
@@ -1175,7 +1176,6 @@ fn cluster_tree_to_graph_data(tree: &crate::clustering::ClusterTree) -> GraphDat
                         edge_type: "similarity".to_string(),
                         weight: Some(sim),
                     });
-                    let _ = graph_level; // level情報はエッジのsource/targetのノードから取得可能
                     edge_counter += 1;
                 }
             }
