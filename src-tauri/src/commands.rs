@@ -604,6 +604,47 @@ fn format_time_ago(timestamp: i64) -> String {
     }
 }
 
+/// 設定に応じて Candle（ローカル）または Vertex AI でテキスト生成を行う共通ヘルパー。
+async fn generate_with_backend(
+    state: &AppState,
+    prompt: &str,
+    max_tokens: u32,
+) -> Result<String, String> {
+    let (backend, sa_json, project_id, location, model) = {
+        let config = state.config.read().map_err(|e| format!("Config lock error: {}", e))?;
+        (
+            config.ai.backend.clone(),
+            config.ai.vertex_ai_service_account_json.clone(),
+            config.ai.vertex_ai_project_id.clone(),
+            config.ai.vertex_ai_location.clone(),
+            config.ai.vertex_ai_model.clone(),
+        )
+    };
+
+    if backend == "vertex" || backend == "vertex_ai" {
+        if sa_json.is_empty() || project_id.is_empty() {
+            return Err("Vertex AI設定が不完全です（サービスアカウントJSON / プロジェクトID）".to_string());
+        }
+        let access_token = crate::vertex_ai::get_access_token(&sa_json).await?;
+        // Gemma instruct フォーマットのタグを除去してプレーンプロンプトにする
+        let clean_prompt = prompt
+            .replace("<start_of_turn>user\n", "")
+            .replace("<end_of_turn>\n<start_of_turn>model\n", "");
+        crate::vertex_ai::call_gemini_text(&access_token, &project_id, &location, &model, &clean_prompt, max_tokens).await
+    } else {
+        // Candle（ローカル推論）
+        let candle_arc = std::sync::Arc::clone(&state.candle);
+        let prompt = prompt.to_string();
+        tokio::task::spawn_blocking(move || {
+            let mut guard = candle_arc.lock().map_err(|e| format!("Lock error: {}", e))?;
+            let candle_state = guard.as_mut().ok_or("モデル未ロード")?;
+            candle_state.generate(&prompt, max_tokens, |_| {})
+        })
+        .await
+        .map_err(|e| format!("タスクエラー: {}", e))?
+    }
+}
+
 /// 今週のサマリをキャッシュから返す。なければ None。
 #[tauri::command]
 pub async fn get_weekly_summary(state: State<'_, AppState>) -> Result<Option<String>, String> {
@@ -629,15 +670,7 @@ pub async fn generate_weekly_summary(state: State<'_, AppState>) -> Result<Strin
     };
 
     let prompt = crate::ai::build_weekly_summary_prompt(&week_label, &activity);
-    let candle_arc = std::sync::Arc::clone(&state.candle);
-
-    let summary = tokio::task::spawn_blocking(move || {
-        let mut guard = candle_arc.lock().map_err(|e| format!("Lock error: {}", e))?;
-        let candle_state = guard.as_mut().ok_or("モデル未ロード")?;
-        candle_state.generate(&prompt, 256, |_| {})
-    })
-    .await
-    .map_err(|e| format!("タスクエラー: {}", e))??;
+    let summary = generate_with_backend(&state, &prompt, 256).await?;
 
     state.db.store_weekly_summary(week_start, &summary)?;
     Ok(summary)
@@ -650,11 +683,21 @@ pub async fn detect_contradictions(
     path: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<MarginAnnotation>, String> {
-    // モデル未ロード時はスキップ
+    // バックエンドが利用可能か確認
     {
-        let guard = state.candle.lock().map_err(|e| format!("Lock error: {}", e))?;
-        if guard.is_none() {
-            return Ok(vec![]);
+        let config = state.config.read().map_err(|e| format!("Config lock error: {}", e))?;
+        let backend = &config.ai.backend;
+        if backend == "vertex" || backend == "vertex_ai" {
+            // Vertex AI: 設定が揃っていれば OK
+            if config.ai.vertex_ai_service_account_json.is_empty() || config.ai.vertex_ai_project_id.is_empty() {
+                return Ok(vec![]);
+            }
+        } else {
+            // Candle: モデルがロードされていなければスキップ
+            let guard = state.candle.lock().map_err(|e| format!("Lock error: {}", e))?;
+            if guard.is_none() {
+                return Ok(vec![]);
+            }
         }
     }
 
@@ -703,15 +746,8 @@ pub async fn detect_contradictions(
 
         let time_ago = format_time_ago(*timestamp);
         let prompt = crate::ai::build_self_contradiction_prompt(&current_content, &past_content, &time_ago);
-        let candle_arc = std::sync::Arc::clone(&state.candle);
 
-        let response = tokio::task::spawn_blocking(move || {
-            let mut guard = candle_arc.lock().map_err(|e| format!("Lock error: {}", e))?;
-            let candle_state = guard.as_mut().ok_or("モデル未ロード")?;
-            candle_state.generate(&prompt, 128, |_| {})
-        })
-        .await
-        .map_err(|e| format!("Task error: {}", e))??;
+        let response = generate_with_backend(&state, &prompt, 128).await?;
 
         if let Some(description) = crate::ai::parse_contradiction_response(&response) {
             // タイムスタンプをキーに含め、キャッシュから再取得時に相対時間を復元できるようにする
@@ -740,15 +776,8 @@ pub async fn detect_contradictions(
         };
 
         let prompt = crate::ai::build_contradiction_prompt(&current_content, &other_content);
-        let candle_arc = std::sync::Arc::clone(&state.candle);
 
-        let response = tokio::task::spawn_blocking(move || {
-            let mut guard = candle_arc.lock().map_err(|e| format!("Lock error: {}", e))?;
-            let candle_state = guard.as_mut().ok_or("モデル未ロード")?;
-            candle_state.generate(&prompt, 128, |_| {})
-        })
-        .await
-        .map_err(|e| format!("Task error: {}", e))??;
+        let response = generate_with_backend(&state, &prompt, 128).await?;
 
         if let Some(description) = crate::ai::parse_contradiction_response(&response) {
             let _ = state.db.store_contradiction(&path, &similar_path, &description);

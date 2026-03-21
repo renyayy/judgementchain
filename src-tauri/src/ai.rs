@@ -460,10 +460,8 @@ fn parse_float_array(s: &str) -> Option<Vec<f32>> {
     }
 }
 
-/// テキストからembeddingを生成（backend設定に基づく）。
-pub fn generate_embedding(backend: &str, model: &str, text: &str) -> Option<Vec<f32>> {
-    match backend {
-        "ollama" => embed_with_ollama(model, text),
-        _ => None,
-    }
+/// テキストからembeddingを生成。
+/// embedding は常に Ollama を使用する（LLM推論の backend 設定とは独立）。
+pub fn generate_embedding(_backend: &str, model: &str, text: &str) -> Option<Vec<f32>> {
+    embed_with_ollama(model, text)
 }
