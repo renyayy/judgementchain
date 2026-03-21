@@ -628,6 +628,8 @@ function AppInner() {
           />
         )}
 
+
+
         {rightPanel === "plugins" && <PluginSettings />}
         {activePluginPanel && rightPanel !== "plugins" && (
           <PluginPanelHost panel={activePluginPanel} />
