@@ -223,13 +223,26 @@ export default function GraphPanel({ vaultPath, onOpenFile }: GraphPanelProps) {
           },
         },
       ],
-      layout: (viewMode === "graph" ? {
-        name: "cose",
-        padding: 30,
-        nodeRepulsion: () => 8000,
-        idealEdgeLength: () => 80,
-        animate: false,
-      } : {
+      layout: (viewMode === "graph" ? (() => {
+        // Fibonacci Spiral（ひまわり配列）で円内に均等配置
+        const n = graphData.nodes.length;
+        const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+        const containerEl = cyRef.current!;
+        const w = containerEl.clientWidth / 2;
+        const h = containerEl.clientHeight / 2;
+        const radius = Math.min(w, h) - 40;
+        const positions: Record<string, { x: number; y: number }> = {};
+        graphData.nodes.forEach((node, i) => {
+          const r = radius * Math.sqrt((i + 0.5) / n);
+          const theta = i * goldenAngle;
+          positions[node.id] = { x: w + r * Math.cos(theta), y: h + r * Math.sin(theta) };
+        });
+        return {
+          name: "preset",
+          positions: (node: cytoscape.NodeSingular) => positions[node.id()] || { x: w, y: h },
+          padding: 30,
+        };
+      })() : {
         name: "dagre",
         rankDir: "BT",
         nodeSep: 20,
