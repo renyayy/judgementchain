@@ -35,6 +35,9 @@ judgement-brain_{{version}}_aarch64.dmg
 .env.*
 mise.prod.toml
 
+# Build artifacts
+bundledFileStatus.html
+
 # Project docs (managed locally)
 .issues/
 .docs/
