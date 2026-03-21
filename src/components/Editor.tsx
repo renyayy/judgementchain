@@ -1,17 +1,18 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import { FileViewer, isViewableFile } from "./FileViewer";
 import { MarkdownCodeEditor } from "./MarkdownCodeEditor";
 import CodeMirror from "@uiw/react-codemirror";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { LanguageDescription } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
-import { oneDark } from "@codemirror/theme-one-dark";
 import { EditorView } from "@codemirror/view";
 import { Extension } from "@codemirror/state";
 import "highlight.js/styles/github-dark.css";
+import { nomosDark, nomosLight } from "../lib/editorThemes";
 import { wikilinkPlugin, wikilinkClickHandler } from "../extensions/wikilinks";
 import { wordCompletionExtension } from "../extensions/wordCompletion";
 import { MarkdownPreview } from "./MarkdownPreview";
+import { usePluginRegistry } from "../plugins/registry";
 
 type ViewMode = "edit" | "split" | "preview";
 
@@ -19,31 +20,11 @@ interface EditorProps {
   content: string;
   filePath: string | null;
   isDirty: boolean;
+  fontSize?: number;
+  theme?: "dark" | "light";
   onChange: (value: string) => void;
   onNavigate?: (link: string) => void;
 }
-
-const editorTheme = EditorView.theme({
-  "&": {
-    height: "100%",
-    fontSize: "14px",
-  },
-  ".cm-scroller": {
-    overflow: "auto",
-    fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-    lineHeight: "1.7",
-  },
-  ".cm-content": {
-    padding: "16px 20px",
-    maxWidth: "760px",
-    margin: "0 auto",
-  },
-  ".cm-line": {
-    padding: "0",
-  },
-});
-
-const sharedExtensions = [editorTheme, EditorView.lineWrapping];
 
 function getFileName(path: string) {
   return path.split("/").pop() ?? path;
@@ -57,9 +38,23 @@ function isAdocFile(path: string) {
   return path.toLowerCase().endsWith(".adoc");
 }
 
-export function Editor({ content, filePath, isDirty, onChange, onNavigate }: EditorProps) {
+export function Editor({ content, filePath, isDirty, fontSize = 14, theme = "dark", onChange, onNavigate }: EditorProps) {
+  const editorTheme = useMemo(() => EditorView.theme({
+    "&": { height: "100%", fontSize: `${fontSize}px`, backgroundColor: "var(--bg-primary)" },
+    ".cm-scroller": { overflow: "auto", fontFamily: "'JetBrains Mono', 'Fira Code', monospace", lineHeight: "1.7" },
+    ".cm-content": { padding: "16px 20px", maxWidth: "760px", margin: "0 auto" },
+    ".cm-line": { padding: "0" },
+    ".cm-gutters": { backgroundColor: "var(--bg-secondary)", borderRight: "1px solid var(--border)" },
+    ".cm-activeLineGutter": { backgroundColor: "var(--bg-tertiary)" },
+  }), [fontSize]);
+
+  const sharedExtensions = useMemo(() => [editorTheme, EditorView.lineWrapping], [editorTheme]);
+
   const [extensions, setExtensions] = useState<Extension[]>(sharedExtensions);
   const [viewMode, setViewMode] = useState<ViewMode>("edit");
+  const { editorExtensions, emit } = usePluginRegistry();
+
+  const emitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!filePath || !isMarkdownFile(filePath)) {
@@ -83,7 +78,7 @@ export function Editor({ content, filePath, isDirty, onChange, onNavigate }: Edi
           wikilinkPlugin,
           ...(onNavigate ? [wikilinkClickHandler(onNavigate)] : []),
         ];
-        if (!cancelled) setExtensions(markdownExtensions);
+        if (!cancelled) setExtensions([...markdownExtensions, ...editorExtensions]);
         return;
       }
 
@@ -97,7 +92,7 @@ export function Editor({ content, filePath, isDirty, onChange, onNavigate }: Edi
       try {
         const loaded = description ? await description.load() : null;
         const languageExtensions: Extension[] = loaded ? [...baseExtensions, loaded] : baseExtensions;
-        if (!cancelled) setExtensions(languageExtensions);
+        if (!cancelled) setExtensions([...languageExtensions, ...editorExtensions]);
       } catch {
         // `@codemirror/lang-*` が未導入の場合などでも、エディタが壊れないようフォールバックする
         if (!cancelled) setExtensions(baseExtensions);
@@ -109,7 +104,7 @@ export function Editor({ content, filePath, isDirty, onChange, onNavigate }: Edi
     return () => {
       cancelled = true;
     };
-  }, [filePath, onNavigate]);
+  }, [filePath, onNavigate, editorExtensions]);
 
   if (!filePath) {
     return (
@@ -173,43 +168,45 @@ export function Editor({ content, filePath, isDirty, onChange, onNavigate }: Edi
       <div className={`editor-body editor-body--${viewMode}`}>
         {(viewMode === "edit" || viewMode === "split") && (
           <div className="editor-cm-pane">
-            {isMarkdownFile(filePath) ? (
-              <MarkdownCodeEditor value={content} onChange={onChange} onNavigate={onNavigate} />
-            ) : (
-              <CodeMirror
-                value={content}
-                height="100%"
-                theme={oneDark}
-                extensions={extensions}
-                onChange={onChange}
-                basicSetup={{
-                  lineNumbers: true,
-                  highlightActiveLineGutter: true,
-                  highlightSpecialChars: true,
-                  history: true,
-                  foldGutter: false,
-                  drawSelection: true,
-                  dropCursor: true,
-                  allowMultipleSelections: true,
-                  indentOnInput: true,
-                  syntaxHighlighting: true,
-                  bracketMatching: true,
-                  closeBrackets: true,
-                  autocompletion: true,
-                  rectangularSelection: false,
-                  crosshairCursor: false,
-                  highlightActiveLine: true,
-                  highlightSelectionMatches: true,
-                  closeBracketsKeymap: true,
-                  defaultKeymap: true,
-                  searchKeymap: true,
-                  historyKeymap: true,
-                  foldKeymap: false,
-                  completionKeymap: true,
-                  lintKeymap: true,
-                }}
-              />
-            )}
+            <CodeMirror
+              value={content}
+              height="100%"
+              theme={theme === "light" ? nomosLight : nomosDark}
+              extensions={extensions}
+              onChange={(v) => {
+                if (emitTimerRef.current) clearTimeout(emitTimerRef.current);
+                emitTimerRef.current = setTimeout(() => {
+                  emit("editor-change", filePath, v);
+                }, 100);
+                onChange(v);
+              }}
+              basicSetup={{
+                lineNumbers: true,
+                highlightActiveLineGutter: true,
+                highlightSpecialChars: true,
+                history: true,
+                foldGutter: false,
+                drawSelection: true,
+                dropCursor: true,
+                allowMultipleSelections: true,
+                indentOnInput: true,
+                syntaxHighlighting: true,
+                bracketMatching: true,
+                closeBrackets: true,
+                autocompletion: true,
+                rectangularSelection: false,
+                crosshairCursor: false,
+                highlightActiveLine: true,
+                highlightSelectionMatches: true,
+                closeBracketsKeymap: true,
+                defaultKeymap: true,
+                searchKeymap: true,
+                historyKeymap: true,
+                foldKeymap: false,
+                completionKeymap: true,
+                lintKeymap: true,
+              }}
+            />
           </div>
         )}
 

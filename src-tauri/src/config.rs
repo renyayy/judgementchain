@@ -9,8 +9,16 @@ fn default_vertex_model() -> String {
     "gemini-2.0-flash-001".to_string()
 }
 
+fn default_graph_backend() -> String {
+    "claude".to_string()
+}
+
 fn default_max_system_memory_fraction() -> f64 {
     0.8
+}
+
+fn default_ignore_memory_budget() -> bool {
+    false
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -18,12 +26,18 @@ pub struct PerformanceConfig {
     /// プロセスの仮想メモリ上限を、搭載物理メモリのこの割合に抑える（1.0 = 100%）。0 以下で無効。
     #[serde(default = "default_max_system_memory_fraction")]
     pub max_system_memory_fraction: f64,
+
+    /// メモリ上限（ロード前チェック/RLIMIT_AS）を無視する。
+    /// 使う場合は自己責任（プロセスがOSに kill される可能性があります）。
+    #[serde(default = "default_ignore_memory_budget")]
+    pub ignore_memory_budget: bool,
 }
 
 impl Default for PerformanceConfig {
     fn default() -> Self {
         Self {
             max_system_memory_fraction: default_max_system_memory_fraction(),
+            ignore_memory_budget: default_ignore_memory_budget(),
         }
     }
 }
@@ -42,6 +56,8 @@ pub struct Config {
 pub struct VaultConfig {
     pub path: String,
     pub auto_save_interval_ms: u64,
+    #[serde(default)]
+    pub plugins_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,6 +74,8 @@ pub struct AiConfig {
     pub vertex_ai_location: String,
     #[serde(default = "default_vertex_model")]
     pub vertex_ai_model: String,
+    #[serde(default = "default_graph_backend")]
+    pub graph_backend: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -81,6 +99,7 @@ impl Default for Config {
             vault: VaultConfig {
                 path: "~/Documents/nomos-vault".to_string(),
                 auto_save_interval_ms: 2000,
+                plugins_path: None,
             },
             ai: AiConfig {
                 backend: "ollama".to_string(),
@@ -91,6 +110,7 @@ impl Default for Config {
                 vertex_ai_project_id: "".to_string(),
                 vertex_ai_location: default_vertex_location(),
                 vertex_ai_model: default_vertex_model(),
+                graph_backend: default_graph_backend(),
             },
             git: GitConfig {
                 enabled: false,
@@ -111,15 +131,30 @@ impl Default for Config {
 impl Config {
     pub fn load() -> Self {
         let config_path = Self::config_file_path();
-        if let Some(path) = config_path {
+        if let Some(path) = &config_path {
+            eprintln!("[config] loading from: {}", path.display());
             if path.exists() {
-                if let Ok(content) = std::fs::read_to_string(&path) {
-                    if let Ok(config) = toml::from_str::<Config>(&content) {
-                        return config;
+                match std::fs::read_to_string(path) {
+                    Ok(content) => {
+                        match toml::from_str::<Config>(&content) {
+                            Ok(config) => {
+                                eprintln!("[config] loaded OK, ai.backend={}, project_id={}", config.ai.backend, config.ai.vertex_ai_project_id);
+                                return config;
+                            }
+                            Err(e) => {
+                                eprintln!("[config] TOML parse error: {}", e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[config] file read error: {}", e);
                     }
                 }
+            } else {
+                eprintln!("[config] file not found: {}", path.display());
             }
         }
+        eprintln!("[config] using default config");
         Config::default()
     }
 
@@ -143,6 +178,15 @@ impl Config {
 
     pub fn get_vault_path(&self) -> PathBuf {
         expand_tilde(&self.vault.path)
+    }
+
+    pub fn get_plugins_path(&self) -> PathBuf {
+        match &self.vault.plugins_path {
+            Some(p) if !p.is_empty() => expand_tilde(p),
+            _ => dirs::home_dir()
+                .map(|h| h.join(".config").join("nomos").join("plugins"))
+                .unwrap_or_else(|| self.get_vault_path().join(".nomos").join("plugins")),
+        }
     }
 
     fn config_file_path() -> Option<PathBuf> {

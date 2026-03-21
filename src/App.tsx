@@ -2,30 +2,37 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { FileTree } from "./components/FileTree";
-import { EditorPane, type PaneState } from "./components/EditorPane";
-import { MarginPanel } from "./components/MarginPanel";
-import { GitPanel } from "./components/GitPanel";
-import { NotificationContainer } from "./components/NotificationContainer";
-import { AiChatPanel } from "./components/AiChatPanel";
-import GraphPanel from "./components/GraphPanel";
-import { TerminalPanel } from "./components/TerminalPanel";
-import { LeftActivityBar, RightActivityBar } from "./components/ActivityBar";
-import { GemmaTermsModal, isGemmaTermsAccepted } from "./components/GemmaTermsModal";
-import { useVault } from "./hooks/useVault";
-import { useAppMenu } from "./hooks/useAppMenu";
-import { useGit } from "./hooks/useGit";
-import { useAI } from "./hooks/useAI";
-import { isViewableFile } from "./components/FileViewer";
-import type { EditorTab, MarginAnnotation } from "./types";
-import "./App.css";
+import { FileTree } from "@/components/FileTree";
+import { EditorPane, type PaneState } from "@/components/EditorPane";
+import { MarginPanel } from "@/components/MarginPanel";
+import { GitPanel } from "@/components/GitPanel";
+import { NotificationContainer } from "@/components/NotificationContainer";
+import { AiChatPanel } from "@/components/AiChatPanel";
+import GraphPanel from "@/components/GraphPanel";
+import { TerminalPanel } from "@/components/TerminalPanel";
+import { LeftActivityBar, RightActivityBar } from "@/components/ActivityBar";
+import { GemmaTermsModal, isGemmaTermsAccepted } from "@/components/GemmaTermsModal";
+import { useVault } from "@/hooks/useVault";
+import { useAppMenu } from "@/hooks/useAppMenu";
+import { useGit } from "@/hooks/useGit";
+import { useAI } from "@/hooks/useAI";
+import { useSettings } from "./hooks/useSettings";
+import { isViewableFile } from "@/components/FileViewer";
+import type { EditorTab, MarginAnnotation } from "@/types";
+import "@/App.css";
+import "@/plugins/PluginUI.css";
+import { PluginRegistryProvider, usePluginRegistry } from "@/plugins/registry";
+import { PluginPanelHost } from "@/components/PluginPanelHost";
+import { PluginSettings } from "@/components/PluginSettings";
+import { StatusBar } from "@/components/StatusBar";
+import { CommandPalette } from "@/components/CommandPalette";
 
 const AUTO_SAVE_DELAY = 1000;
 let tabCounter = 0;
 const newTabId = () => `tab-${++tabCounter}`;
 const EMPTY_PANE: PaneState = { tabs: [], activeId: null };
 
-function App() {
+function AppInner() {
   const { files, listFiles, openFile, saveFile, createFile, createDir, deleteFile, renameFile, getMarginAnnotations, getBacklinks } = useVault();
 
   const [leftPane, setLeftPane] = useState<PaneState>(EMPTY_PANE);
@@ -34,25 +41,33 @@ function App() {
   const [activePaneId, setActivePaneId] = useState<"left" | "right">("left");
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [rightPanel, setRightPanel] = useState<"git" | "ai" | "graph" | "margin" | null>("margin");
+  const [rightPanel, setRightPanel] = useState<string | null>("margin");
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [terminalHeight, setTerminalHeight] = useState(220);
   const [vaultName, setVaultName] = useState("");
 
-  const toggleRightPanel = (panel: "git" | "ai" | "graph" | "margin") => {
+  const { panels: pluginPanels, emit } = usePluginRegistry();
+
+  const toggleRightPanel = (panel: string) => {
     setRightPanel((prev) => (prev === panel ? null : panel));
   };
   const [vaultPath, setVaultPath] = useState("");
   const [showGemmaTerms, setShowGemmaTerms] = useState(false);
 
+  const { settings, updateSettings } = useSettings();
   const { modelStatus, messages, isGenerating, loadModel, generateText, clearMessages } = useAI();
   const { status: gitStatus, commits: gitCommits, refresh: refreshGit, stage: gitStage, unstage: gitUnstage, discard: gitDiscard, commit: gitCommit, initRepo: gitInit } = useGit();
   const [folderExpandSignal, setFolderExpandSignal] = useState<boolean | null>(null);
 
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const contradictionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isGeneratingSummaryRef = useRef(false);
   const activePaneIdRef = useRef<"left" | "right">("left");
   activePaneIdRef.current = activePaneId;
+  const leftPaneRef = useRef<PaneState>(EMPTY_PANE);
+  leftPaneRef.current = leftPane;
+  const rightPaneRef = useRef<PaneState>(EMPTY_PANE);
+  rightPaneRef.current = rightPane;
 
   // ---- helpers ----------------------------------------------------------------
 
@@ -85,6 +100,45 @@ function App() {
     refreshGit();
   }, [listFiles]);
 
+  // ---- auto-generate weekly summary when model is ready --------------------
+
+  useEffect(() => {
+    if (modelStatus !== "ready") return;
+    if (isGeneratingSummaryRef.current) return;
+    isGeneratingSummaryRef.current = true;
+
+    invoke<string | null>("get_weekly_summary")
+      .then((summary) => {
+        if (summary !== null) return Promise.reject("already_generated");
+        return invoke<string>("generate_weekly_summary");
+      })
+      .then(() => {
+        // 完了時点でアクティブなペイン/タブを refs から読み取り stale closure を回避
+        const paneId = activePaneIdRef.current;
+        const pane = paneId === "left" ? leftPaneRef.current : rightPaneRef.current;
+        const tab = pane.tabs.find((t) => t.id === pane.activeId);
+        if (tab?.tabType === "file") {
+          getMarginAnnotations(tab.path).then((annots) => {
+            const setPaneLocal = paneId === "left" ? setLeftPane : setRightPane;
+            setPaneLocal((cur) => ({
+              ...cur,
+              tabs: cur.tabs.map((t) =>
+                t.id === tab.id ? { ...t, annotations: annots } : t
+              ),
+            }));
+          });
+        }
+      })
+      .catch((error) => {
+        if (error !== "already_generated") {
+          console.error("Failed to generate weekly summary", error);
+        }
+      })
+      .finally(() => {
+        isGeneratingSummaryRef.current = false;
+      });
+  }, [modelStatus]);
+
   useEffect(() => {
     const u = listen("vault:changed", () => { listFiles(); refreshGit(); });
     return () => { u.then((f) => f()); };
@@ -98,6 +152,7 @@ function App() {
     if (existing) {
       setPane(paneId, (p) => ({ ...p, activeId: existing.id }));
       setActivePaneId(paneId);
+      emit("file-open", path);
       return;
     }
 
@@ -108,6 +163,7 @@ function App() {
         activeId: id,
       }));
       setActivePaneId(paneId);
+      emit("file-open", path);
       return;
     }
 
@@ -120,6 +176,7 @@ function App() {
       activeId: id,
     }));
     setActivePaneId(paneId);
+    emit("file-open", path);
   }, [leftPane, rightPane, openFile, getMarginAnnotations, getBacklinks, setPane]);
 
   const handleSelectFile = useCallback((path: string) =>
@@ -156,7 +213,10 @@ function App() {
 
   const closeTabInPane = useCallback(async (tabId: string, paneId: "left" | "right") => {
     const tab = getPane(paneId).tabs.find((t) => t.id === tabId);
-    if (tab?.isDirty && tab.tabType === "file") await saveFile(tab.path, tab.content);
+    if (tab?.isDirty && tab.tabType === "file") {
+      await saveFile(tab.path, tab.content);
+      emit("file-save", tab.path);
+    }
     setPane(paneId, (prev) => {
       const next = prev.tabs.filter((t) => t.id !== tabId);
       let newActiveId = prev.activeId;
@@ -252,6 +312,7 @@ function App() {
         const tab = prev.tabs.find((t) => t.id === prev.activeId);
         if (!tab || tab.tabType !== "file") return prev;
         saveFile(tab.path, tab.content).then(async () => {
+          emit("file-save", tab.path);
           const annots = await getMarginAnnotations(tab.path);
           refreshGit();
           setPaneLocal((cur) => ({
@@ -267,7 +328,7 @@ function App() {
               setPaneLocal((cur) => ({
                 ...cur,
                 tabs: cur.tabs.map((t) =>
-                  t.id === tab.id ? { ...t, annotations: [...t.annotations.filter((a) => a.annotation_type !== "contradiction"), ...cs] } : t
+                  t.id === tab.id ? { ...t, annotations: [...t.annotations.filter((a) => a.annotation_type !== "contradiction" && a.annotation_type !== "self_contradiction"), ...cs] } : t
                 ),
               }));
             }
@@ -375,6 +436,31 @@ function App() {
 
   const handleOpenNote = useCallback((path: string) => handleSelectFile(path), [handleSelectFile]);
 
+  // ---- settings tab -----------------------------------------------------------
+
+  const openSettingsTab = useCallback(() => {
+    openSpecialTab({
+      path: "settings",
+      tabType: "settings",
+      content: "",
+      savedContent: "",
+      isDirty: false,
+      annotations: [],
+      backlinks: [],
+    }, activePaneIdRef.current);
+  }, [openSpecialTab]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === ",") {
+        e.preventDefault();
+        openSettingsTab();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [openSettingsTab]);
+
   // ---- vault change -----------------------------------------------------------
 
   const resetVault = useCallback(async (dir: string) => {
@@ -404,6 +490,7 @@ function App() {
   });
 
   const showRight = splitOpen && rightPane.tabs.length > 0;
+  const activePluginPanel = pluginPanels.find((p) => p.id === rightPanel) ?? null;
 
   return (
     <div className="app">
@@ -421,6 +508,7 @@ function App() {
         <div className="app-header-right">
           {activeTab?.isDirty && <span className="save-indicator">未保存</span>}
           <button className={`header-btn ${splitOpen ? "active" : ""}`} onClick={() => setSplitOpen((v) => !v)} title="分割表示">◫</button>
+          <button className="header-btn" onClick={openSettingsTab} title="設定">⚙</button>
         </div>
       </header>
 
@@ -453,6 +541,8 @@ function App() {
           <EditorPane
             pane={leftPane}
             isActive={activePaneId === "left"}
+            settings={settings}
+            onUpdateSettings={updateSettings}
             onFocus={() => setActivePaneId("left")}
             onSwitch={(id) => setLeftPane((p) => ({ ...p, activeId: id }))}
             onClose={(id) => closeTabInPane(id, "left")}
@@ -469,6 +559,8 @@ function App() {
               <EditorPane
                 pane={rightPane}
                 isActive={activePaneId === "right"}
+                settings={settings}
+                onUpdateSettings={updateSettings}
                 onFocus={() => setActivePaneId("right")}
                 onSwitch={(id) => setRightPane((p) => ({ ...p, activeId: id }))}
                 onClose={(id) => closeTabInPane(id, "right")}
@@ -518,9 +610,30 @@ function App() {
             annotations={activeTab?.annotations ?? []}
             backlinks={activeTab?.backlinks ?? []}
             onOpenNote={handleOpenNote}
+            onRefreshAnnotations={() => {
+              const pane = activePaneId === "left" ? leftPane : rightPane;
+              const tab = pane.tabs.find((t) => t.id === pane.activeId);
+              if (tab?.tabType === "file") {
+                getMarginAnnotations(tab.path).then((annots) => {
+                  const setPaneLocal = activePaneId === "left" ? setLeftPane : setRightPane;
+                  setPaneLocal((cur) => ({
+                    ...cur,
+                    tabs: cur.tabs.map((t) =>
+                      t.id === tab.id ? { ...t, annotations: annots } : t
+                    ),
+                  }));
+                });
+              }
+            }}
           />
         )}
-        </div>{/* app-body-main */}
+
+
+
+        {rightPanel === "plugins" && <PluginSettings />}
+        {activePluginPanel && rightPanel !== "plugins" && (
+          <PluginPanelHost panel={activePluginPanel} />
+        )}        </div>{/* app-body-main */}
         <TerminalPanel
           isOpen={terminalOpen}
           height={terminalHeight}
@@ -531,10 +644,20 @@ function App() {
         <RightActivityBar
           rightPanel={rightPanel}
           onToggleRightPanel={toggleRightPanel}
+          pluginPanels={pluginPanels}
+
         />
       </div>
+      <StatusBar />
+      <CommandPalette />
     </div>
   );
 }
 
-export default App;
+export default function App() {
+  return (
+    <PluginRegistryProvider>
+      <AppInner />
+    </PluginRegistryProvider>
+  );
+}

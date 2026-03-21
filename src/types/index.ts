@@ -39,6 +39,7 @@ export interface Config {
   };
   performance?: {
     max_system_memory_fraction?: number;
+    ignore_memory_budget?: boolean;
   };
 }
 
@@ -81,7 +82,7 @@ export interface GraphData {
 
 export type AnalysisStatus = "idle" | "analyzing" | "done" | "error";
 
-export type EditorTabType = "file" | "diff" | "commit";
+export type EditorTabType = "file" | "diff" | "commit" | "settings";
 
 export interface EditorTab {
   id: string;

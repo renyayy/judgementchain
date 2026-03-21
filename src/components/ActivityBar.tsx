@@ -1,4 +1,4 @@
-type RightPanel = "git" | "ai" | "graph" | "margin";
+import type { PluginPanelRegistration } from "../plugins/types";
 
 interface LeftActivityBarProps {
   sidebarOpen: boolean;
@@ -8,8 +8,9 @@ interface LeftActivityBarProps {
 }
 
 interface RightActivityBarProps {
-  rightPanel: RightPanel | null;
-  onToggleRightPanel: (panel: RightPanel) => void;
+  rightPanel: string | null;
+  onToggleRightPanel: (panel: string) => void;
+  pluginPanels: PluginPanelRegistration[];
 }
 
 export function LeftActivityBar({ sidebarOpen, onToggleSidebar, terminalOpen, onToggleTerminal }: LeftActivityBarProps) {
@@ -37,7 +38,7 @@ export function LeftActivityBar({ sidebarOpen, onToggleSidebar, terminalOpen, on
   );
 }
 
-export function RightActivityBar({ rightPanel, onToggleRightPanel }: RightActivityBarProps) {
+export function RightActivityBar({ rightPanel, onToggleRightPanel, pluginPanels }: RightActivityBarProps) {
   return (
     <div className="activity-bar activity-bar--right">
       <button
@@ -68,6 +69,25 @@ export function RightActivityBar({ rightPanel, onToggleRightPanel }: RightActivi
       >
         ◧
       </button>
+
+      <button
+        className={`activity-btn ${rightPanel === "plugins" ? "active" : ""}`}
+        onClick={() => onToggleRightPanel("plugins")}
+        title="Plugins"
+      >
+        ⊕
+      </button>
+
+      {pluginPanels.map((p) => (
+        <button
+          key={p.id}
+          className={`activity-btn ${rightPanel === p.id ? "active" : ""}`}
+          onClick={() => onToggleRightPanel(p.id)}
+          title={p.title}
+        >
+          {p.icon}
+        </button>
+      ))}
     </div>
   );
 }

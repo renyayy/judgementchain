@@ -42,6 +42,7 @@ export default function GraphPanel({ vaultPath, onOpenFile }: GraphPanelProps) {
   });
   const [savingConfig, setSavingConfig] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
+  const [graphBackend, setGraphBackend] = useState("claude");
 
   // リサイズ
   const [width, setWidth] = useState(420);
@@ -60,6 +61,7 @@ export default function GraphPanel({ vaultPath, onOpenFile }: GraphPanelProps) {
           location: ai.vertex_ai_location ?? "us-central1",
           model: ai.vertex_ai_model ?? "gemini-2.0-flash-001",
         });
+        setGraphBackend(ai.graph_backend ?? "claude");
       }
     });
   }, []);
@@ -369,7 +371,7 @@ export default function GraphPanel({ vaultPath, onOpenFile }: GraphPanelProps) {
         {status === "idle" && (
           <div className="graph-empty">
             <p>「分析」ボタンを押すと、vault内の.mdファイルを解析してネットワーク図を表示します。</p>
-            {!settings.project_id && (
+            {false && !settings.project_id && (
               <p className="graph-empty-warn">⚙ ボタンからVertex AI設定を行ってください。</p>
             )}
           </div>
@@ -378,7 +380,7 @@ export default function GraphPanel({ vaultPath, onOpenFile }: GraphPanelProps) {
         {status === "analyzing" && (
           <div className="graph-progress">
             <div className="graph-spinner" />
-            <span>Vertex AI で解析中...</span>
+            <span>{graphBackend === "vertex_ai" ? "Vertex AI (Gemini)" : graphBackend === "claude" ? "Claude" : graphBackend} で解析中...</span>
             <p className="graph-progress-note">キーワード抽出 → グルーピング → 階層化</p>
           </div>
         )}

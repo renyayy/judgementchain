@@ -5,6 +5,17 @@ use crate::config::Config;
 use crate::database::ActivityLog;
 use crate::vault::{FileEntry, NoteContent};
 
+#[derive(Serialize, Deserialize, Clone)]
+pub struct PluginManifest {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub description: Option<String>,
+    pub main: String, // e.g. "main.js"
+    pub capabilities: Option<Vec<String>>,
+    pub enabled: Option<bool>,
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct MarginAnnotation {
     pub id: String,
@@ -351,6 +362,97 @@ pub async fn reload_config(state: State<'_, AppState>) -> Result<bool, String> {
 }
 
 #[tauri::command]
+pub async fn list_plugins(state: State<'_, AppState>) -> Result<Vec<PluginManifest>, String> {
+    let plugins_root = {
+        let config = state.config.read().map_err(|e| format!("Config lock error: {}", e))?;
+        config.get_plugins_path()
+    };
+    if !plugins_root.exists() {
+        return Ok(vec![]);
+    }
+
+    let mut out: Vec<PluginManifest> = vec![];
+
+    for entry in std::fs::read_dir(&plugins_root).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+
+        let manifest_path = path.join("manifest.json");
+        if !manifest_path.exists() {
+            continue;
+        }
+
+        let raw = std::fs::read_to_string(&manifest_path)
+            .map_err(|e| format!("Failed to read manifest: {}", e))?;
+        let mut manifest: PluginManifest = serde_json::from_str(&raw)
+            .map_err(|e| format!("Failed to parse manifest.json: {}", e))?;
+
+        // manifest.id が空/欠落していた場合、フォルダ名を補完
+        if manifest.id.trim().is_empty() {
+            if let Some(folder_name) = path.file_name().and_then(|s| s.to_str()) {
+                manifest.id = folder_name.to_string();
+            }
+        }
+
+        out.push(manifest);
+    }
+
+    Ok(out)
+}
+
+#[tauri::command]
+pub async fn read_plugin_file(
+    pluginId: String,
+    file: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let (vault_path, plugins_root) = {
+        let config = state.config.read().map_err(|e| format!("Config lock error: {}", e))?;
+        (
+            config.get_vault_path().to_string_lossy().to_string(),
+            config.get_plugins_path(),
+        )
+    };
+
+    if pluginId.contains('/') || pluginId.contains('\\') {
+        return Err("Invalid pluginId".to_string());
+    }
+    if file.starts_with('/') || file.contains("..") || file.contains('\\') {
+        return Err("Invalid file path".to_string());
+    }
+
+    // 1) plugins_path（デフォルト: ~/.config/nomos/plugins）を優先
+    let plugin_dir_from_plugins_path = plugins_root.join(&pluginId);
+    let full_path_plugins_root = plugin_dir_from_plugins_path.join(&file);
+    let exists_plugins_root = full_path_plugins_root.exists();
+
+    // 2) 互換: vault 配下の <vault>/.nomos/plugins もフォールバック
+    let plugin_dir_from_vault = std::path::Path::new(&vault_path)
+        .join(".nomos")
+        .join("plugins")
+        .join(&pluginId);
+    let full_path_vault = plugin_dir_from_vault.join(&file);
+    let exists_vault = full_path_vault.exists();
+
+    let resolved_exists = exists_plugins_root || exists_vault;
+    let resolved_full_path = if exists_plugins_root {
+        full_path_plugins_root.clone()
+    } else {
+        full_path_vault.clone()
+    };
+
+    if !resolved_exists {
+        return Err("Plugin file not found".to_string());
+    }
+
+    std::fs::read_to_string(&resolved_full_path)
+        .map_err(|e| format!("Failed to read plugin file: {}", e))
+}
+
+#[tauri::command]
 pub async fn get_activity_stats(state: State<'_, AppState>) -> Result<Vec<ActivityLog>, String> {
     state.db.get_activity_stats(50)
 }
@@ -394,19 +496,31 @@ pub async fn get_margin_annotations(path: String, state: State<'_, AppState>) ->
     // 2) キャッシュ済み矛盾（TTL 1時間）
     let contradictions = state.db.get_contradictions(&path)?;
     for (i, (conflicting_path, description)) in contradictions.into_iter().enumerate() {
-        let name = std::path::Path::new(&conflicting_path)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("Unknown")
-            .to_string();
-        annotations.push(MarginAnnotation {
-            id: format!("contradiction_{}", i),
-            annotation_type: "contradiction".to_string(),
-            icon: "⚡".to_string(),
-            title: name,
-            content: description,
-            link: Some(conflicting_path),
-        });
+        if conflicting_path.starts_with("self@") {
+            // 自己矛盾（git 履歴ベース）
+            annotations.push(MarginAnnotation {
+                id: format!("self_contradiction_{}", i),
+                annotation_type: "self_contradiction".to_string(),
+                icon: "🔄".to_string(),
+                title: "過去の自分と矛盾".to_string(),
+                content: description,
+                link: None,
+            });
+        } else {
+            let name = std::path::Path::new(&conflicting_path)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("Unknown")
+                .to_string();
+            annotations.push(MarginAnnotation {
+                id: format!("contradiction_{}", i),
+                annotation_type: "contradiction".to_string(),
+                icon: "⚡".to_string(),
+                title: name,
+                content: description,
+                link: Some(conflicting_path),
+            });
+        }
     }
 
     // 3) 論文リンク（BibTeX + keyword 類似度）
@@ -467,6 +581,23 @@ fn current_week_start() -> i64 {
         .unwrap_or(0)
 }
 
+/// UNIX タイムスタンプを「◯日前」「◯週間前」等の相対表現に変換する。
+fn format_time_ago(timestamp: i64) -> String {
+    let now = chrono::Utc::now().timestamp();
+    let diff = now - timestamp;
+    if diff < 3600 {
+        "1時間未満".to_string()
+    } else if diff < 86400 {
+        format!("{}時間", diff / 3600)
+    } else if diff < 604800 {
+        format!("{}日", diff / 86400)
+    } else if diff < 2592000 {
+        format!("{}週間", diff / 604800)
+    } else {
+        format!("{}ヶ月", diff / 2592000)
+    }
+}
+
 /// 今週のサマリをキャッシュから返す。なければ None。
 #[tauri::command]
 pub async fn get_weekly_summary(state: State<'_, AppState>) -> Result<Option<String>, String> {
@@ -492,15 +623,7 @@ pub async fn generate_weekly_summary(state: State<'_, AppState>) -> Result<Strin
     };
 
     let prompt = crate::ai::build_weekly_summary_prompt(&week_label, &activity);
-    let candle_arc = std::sync::Arc::clone(&state.candle);
-
-    let summary = tokio::task::spawn_blocking(move || {
-        let mut guard = candle_arc.lock().map_err(|e| format!("Lock error: {}", e))?;
-        let candle_state = guard.as_mut().ok_or("モデル未ロード")?;
-        candle_state.generate(&prompt, 256, |_| {})
-    })
-    .await
-    .map_err(|e| format!("タスクエラー: {}", e))??;
+    let summary = generate_with_backend(&state, &prompt, 256).await?;
 
     state.db.store_weekly_summary(week_start, &summary)?;
     Ok(summary)
@@ -513,11 +636,21 @@ pub async fn detect_contradictions(
     path: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<MarginAnnotation>, String> {
-    // モデル未ロード時はスキップ
+    // バックエンドが利用可能か確認
     {
-        let guard = state.candle.lock().map_err(|e| format!("Lock error: {}", e))?;
-        if guard.is_none() {
-            return Ok(vec![]);
+        let config = state.config.read().map_err(|e| format!("Config lock error: {}", e))?;
+        let backend = &config.ai.backend;
+        if backend == "vertex" || backend == "vertex_ai" {
+            // Vertex AI: 設定が揃っていれば OK
+            if config.ai.vertex_ai_service_account_json.is_empty() || config.ai.vertex_ai_project_id.is_empty() {
+                return Ok(vec![]);
+            }
+        } else {
+            // Candle: モデルがロードされていなければスキップ
+            let guard = state.candle.lock().map_err(|e| format!("Lock error: {}", e))?;
+            if guard.is_none() {
+                return Ok(vec![]);
+            }
         }
     }
 
@@ -528,15 +661,57 @@ pub async fn detect_contradictions(
     // 既存キャッシュを無効化（再チェック）
     state.db.clear_contradictions(&path)?;
 
-    // 類似ノートを取得（top 3）
-    let embedding = state.db.get_embedding(&path)?.unwrap_or_default();
-    let similar = state.db.find_similar(&embedding, 3, &path)?;
-    if similar.is_empty() {
-        return Ok(vec![]);
+    let mut results: Vec<MarginAnnotation> = vec![];
+
+    // ── 1) 自己矛盾検出（git 履歴 vs 現在） ──
+    let vault_path = {
+        let config = state.config.read().map_err(|e| format!("Config lock error: {}", e))?;
+        config.get_vault_path()
+    };
+
+    let vault_path_str = vault_path.to_string_lossy();
+    let history = crate::git::get_file_history(&vault_path_str, &path, 3);
+    for (commit_hash, timestamp) in &history {
+        let past_content = match crate::git::get_file_at_commit(&vault_path_str, &path, commit_hash) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        // 内容が同じならスキップ
+        if past_content.trim() == current_content.trim() {
+            continue;
+        }
+
+        let time_ago = format_time_ago(*timestamp);
+        let prompt = crate::ai::build_self_contradiction_prompt(&current_content, &past_content, &time_ago);
+        let candle_arc = std::sync::Arc::clone(&state.candle);
+
+        let response = tokio::task::spawn_blocking(move || {
+            let mut guard = candle_arc.lock().map_err(|e| format!("Lock error: {}", e))?;
+            let candle_state = guard.as_mut().ok_or("モデル未ロード")?;
+            candle_state.generate(&prompt, 128, |_| {})
+        })
+        .await
+        .map_err(|e| format!("Task error: {}", e))??;
+
+        if let Some(description) = crate::ai::parse_contradiction_response(&response) {
+            let cache_key = format!("self@{}", &commit_hash[..7.min(commit_hash.len())]);
+            let _ = state.db.store_contradiction(&path, &cache_key, &description);
+
+            results.push(MarginAnnotation {
+                id: format!("self_contradiction_{}", results.len()),
+                annotation_type: "self_contradiction".to_string(),
+                icon: "🔄".to_string(),
+                title: format!("{}前の自分と矛盾", time_ago),
+                content: description,
+                link: None,
+            });
+        }
     }
 
-    // 各類似ノートと矛盾チェック
-    let mut results: Vec<MarginAnnotation> = vec![];
+    // ── 2) 他ノートとの矛盾検出（既存ロジック） ──
+    let embedding = state.db.get_embedding(&path)?.unwrap_or_default();
+    let similar = state.db.find_similar(&embedding, 3, &path)?;
 
     for (similar_path, _) in similar {
         let other_content = match std::fs::read_to_string(&similar_path) {
@@ -547,7 +722,6 @@ pub async fn detect_contradictions(
         let prompt = crate::ai::build_contradiction_prompt(&current_content, &other_content);
         let candle_arc = std::sync::Arc::clone(&state.candle);
 
-        // Candle 推論（spawn_blocking でノンブロッキング）
         let response = tokio::task::spawn_blocking(move || {
             let mut guard = candle_arc.lock().map_err(|e| format!("Lock error: {}", e))?;
             let candle_state = guard.as_mut().ok_or("モデル未ロード")?;
@@ -557,7 +731,6 @@ pub async fn detect_contradictions(
         .map_err(|e| format!("Task error: {}", e))??;
 
         if let Some(description) = crate::ai::parse_contradiction_response(&response) {
-            // キャッシュに保存
             let _ = state.db.store_contradiction(&path, &similar_path, &description);
 
             let name = std::path::Path::new(&similar_path)
@@ -799,14 +972,6 @@ pub async fn load_model(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<(), String> {
-    // 既にロード済みならスキップ
-    {
-        let guard = state.candle.lock().map_err(|e| format!("ロックエラー: {}", e))?;
-        if guard.is_some() {
-            return Ok(());
-        }
-    }
-
     let configured_model_path = {
         let config = state
             .config
@@ -817,14 +982,34 @@ pub async fn load_model(
 
     let model_path = crate::ai::resolve_model_path(&app, Some(&configured_model_path))?;
 
-    let mem_frac = {
+    // 既にロード済みでも、モデルパスが違えば再ロードする。
+    {
+        let mut guard = state.candle.lock().map_err(|e| format!("ロックエラー: {}", e))?;
+        if let Some(cur) = guard.as_ref() {
+            if cur.model_path() == model_path.as_path() {
+                return Ok(());
+            }
+        }
+        *guard = None; // メモリ使用量ピークを抑えるため、先に古い状態を破棄
+    }
+
+    let (mem_frac, ignore_memory_budget) = {
         let config = state
             .config
             .read()
             .map_err(|e| format!("Config lock error: {}", e))?;
-        config.performance.max_system_memory_fraction
+        (
+            config.performance.max_system_memory_fraction,
+            config.performance.ignore_memory_budget,
+        )
     };
-    crate::memory_budget::check_model_load_allowed(mem_frac, &model_path)?;
+
+    if ignore_memory_budget {
+        // ignore=true の場合はロード前チェックをスキップし、可能なら RLIMIT_AS も無効化する
+        crate::memory_budget::disable_address_space_limit();
+    } else {
+        crate::memory_budget::check_model_load_allowed(mem_frac, &model_path)?;
+    }
 
     let candle_arc = std::sync::Arc::clone(&state.candle);
 
@@ -939,10 +1124,13 @@ pub async fn analyze_vault_for_graph(
     dir_path: String,
     state: State<'_, AppState>,
 ) -> Result<GraphData, String> {
-    // 設定から Vertex AI 情報を取得
-    let (sa_json, project_id, location, model) = {
+    // グラフ分析バックエンドを選択
+    use crate::graph_backend::{GraphBackend, ClaudeCliBackend, VertexAiBackend};
+
+    let (graph_backend_name, sa_json, project_id, location, model) = {
         let config = state.config.read().map_err(|e| format!("Config lock error: {}", e))?;
         (
+            config.ai.graph_backend.clone(),
             config.ai.vertex_ai_service_account_json.clone(),
             config.ai.vertex_ai_project_id.clone(),
             config.ai.vertex_ai_location.clone(),
@@ -950,12 +1138,19 @@ pub async fn analyze_vault_for_graph(
         )
     };
 
-    if sa_json.is_empty() || project_id.is_empty() {
-        return Err("Vertex AI設定が不完全です。Graphパネルの⚙設定からサービスアカウントJSONとプロジェクトIDを設定してください。".to_string());
-    }
-
-    // アクセストークン取得
-    let access_token = crate::vertex_ai::get_access_token(&sa_json).await?;
+    let backend: Box<dyn GraphBackend> = match graph_backend_name.as_str() {
+        "vertex_ai" => {
+            if sa_json.is_empty() || project_id.is_empty() {
+                return Err("Vertex AI設定が不完全です。Graphパネルの⚙設定からサービスアカウントJSONとプロジェクトIDを設定してください。".to_string());
+            }
+            let access_token = crate::vertex_ai::get_access_token(&sa_json).await?;
+            Box::new(VertexAiBackend { access_token, project_id, location, model })
+        }
+        _ => {
+            eprintln!("[graph] backend: claude CLI");
+            Box::new(ClaudeCliBackend)
+        }
+    };
 
     // .md ファイル一覧を収集（最大30件）
     let expanded_dir = crate::config::expand_tilde(&dir_path);
@@ -964,6 +1159,10 @@ pub async fn analyze_vault_for_graph(
     for entry in walkdir::WalkDir::new(&expanded_dir)
         .follow_links(false)
         .into_iter()
+        .filter_entry(|e| {
+            // 隠しディレクトリ(.git, .obsidian等)をスキップ
+            e.file_name().to_str().map_or(true, |name| !name.starts_with('.'))
+        })
         .filter_map(|e| e.ok())
     {
         if entry.file_type().is_file() {
@@ -1003,11 +1202,11 @@ pub async fn analyze_vault_for_graph(
             prompt.push_str(&format!("(フルパス: {})\n\n", path));
         }
 
-        let response = crate::vertex_ai::call_gemini(&access_token, &project_id, &location, &model, &prompt).await?;
-        let cleaned = crate::vertex_ai::clean_json_response(&response);
+        let response = backend.query(&prompt).await?;
+        let cleaned = crate::vertex_ai::clean_json_response_owned(&response);
 
-        let entries: Vec<KeywordEntry> = serde_json::from_str(cleaned)
-            .map_err(|e| format!("キーワード抽出レスポンスパースエラー: {} / レスポンス: {}", e, cleaned))?;
+        let entries: Vec<KeywordEntry> = serde_json::from_str(&cleaned)
+            .map_err(|e| format!("キーワード抽出レスポンスパースエラー: {} / レスポンス: {}", e, &cleaned))?;
 
         for entry in entries {
             keyword_map.insert(entry.path, entry.keywords);
@@ -1038,11 +1237,11 @@ pub async fn analyze_vault_for_graph(
         kw_list_str
     );
 
-    let group_response = crate::vertex_ai::call_gemini(&access_token, &project_id, &location, &model, &group_prompt).await?;
-    let group_cleaned = crate::vertex_ai::clean_json_response(&group_response);
+    let group_response = backend.query(&group_prompt).await?;
+    let group_cleaned = crate::vertex_ai::clean_json_response_owned(&group_response);
 
-    let groups: Vec<GroupEntry> = serde_json::from_str(group_cleaned)
-        .map_err(|e| format!("グループ化レスポンスパースエラー: {} / レスポンス: {}", e, group_cleaned))?;
+    let groups: Vec<GroupEntry> = serde_json::from_str(&group_cleaned)
+        .map_err(|e| format!("グループ化レスポンスパースエラー: {} / レスポンス: {}", e, &group_cleaned))?;
 
     // Phase 3: 2トップグループへの集約＋ラベリング（1コール）
     let mut groups_str = String::from("[");
@@ -1070,10 +1269,10 @@ pub async fn analyze_vault_for_graph(
         groups_str
     );
 
-    let hierarchy_response = crate::vertex_ai::call_gemini(&access_token, &project_id, &location, &model, &hierarchy_prompt).await?;
-    let hierarchy_cleaned = crate::vertex_ai::clean_json_response(&hierarchy_response);
+    let hierarchy_response = backend.query(&hierarchy_prompt).await?;
+    let hierarchy_cleaned = crate::vertex_ai::clean_json_response_owned(&hierarchy_response);
 
-    let hierarchy: HierarchyResult = serde_json::from_str(hierarchy_cleaned)
+    let hierarchy: HierarchyResult = serde_json::from_str(&hierarchy_cleaned)
         .map_err(|e| format!("階層化レスポンスパースエラー: {} / レスポンス: {}", e, hierarchy_cleaned))?;
 
     // グラフデータを構築
