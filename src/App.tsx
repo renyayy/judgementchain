@@ -61,8 +61,13 @@ function AppInner() {
 
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const contradictionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isGeneratingSummaryRef = useRef(false);
   const activePaneIdRef = useRef<"left" | "right">("left");
   activePaneIdRef.current = activePaneId;
+  const leftPaneRef = useRef<PaneState>(EMPTY_PANE);
+  leftPaneRef.current = leftPane;
+  const rightPaneRef = useRef<PaneState>(EMPTY_PANE);
+  rightPaneRef.current = rightPane;
 
   // ---- helpers ----------------------------------------------------------------
 
@@ -99,27 +104,39 @@ function AppInner() {
 
   useEffect(() => {
     if (modelStatus !== "ready") return;
-    invoke<string | null>("get_weekly_summary").then((summary) => {
-      if (summary !== null) return;
-      invoke<string>("generate_weekly_summary")
-        .then(() => {
-          // サマリー生成後、アクティブタブのアノテーションを更新
-          const pane = activePaneId === "left" ? leftPane : rightPane;
-          const tab = pane.tabs.find((t) => t.id === pane.activeId);
-          if (tab?.tabType === "file") {
-            getMarginAnnotations(tab.path).then((annots) => {
-              const setPaneLocal = activePaneId === "left" ? setLeftPane : setRightPane;
-              setPaneLocal((cur) => ({
-                ...cur,
-                tabs: cur.tabs.map((t) =>
-                  t.id === tab.id ? { ...t, annotations: annots } : t
-                ),
-              }));
-            });
-          }
-        })
-        .catch(() => {});
-    }).catch(() => {});
+    if (isGeneratingSummaryRef.current) return;
+    isGeneratingSummaryRef.current = true;
+
+    invoke<string | null>("get_weekly_summary")
+      .then((summary) => {
+        if (summary !== null) return Promise.reject("already_generated");
+        return invoke<string>("generate_weekly_summary");
+      })
+      .then(() => {
+        // 完了時点でアクティブなペイン/タブを refs から読み取り stale closure を回避
+        const paneId = activePaneIdRef.current;
+        const pane = paneId === "left" ? leftPaneRef.current : rightPaneRef.current;
+        const tab = pane.tabs.find((t) => t.id === pane.activeId);
+        if (tab?.tabType === "file") {
+          getMarginAnnotations(tab.path).then((annots) => {
+            const setPaneLocal = paneId === "left" ? setLeftPane : setRightPane;
+            setPaneLocal((cur) => ({
+              ...cur,
+              tabs: cur.tabs.map((t) =>
+                t.id === tab.id ? { ...t, annotations: annots } : t
+              ),
+            }));
+          });
+        }
+      })
+      .catch((error) => {
+        if (error !== "already_generated") {
+          console.error("Failed to generate weekly summary", error);
+        }
+      })
+      .finally(() => {
+        isGeneratingSummaryRef.current = false;
+      });
   }, [modelStatus]);
 
   useEffect(() => {
