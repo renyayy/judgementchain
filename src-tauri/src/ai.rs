@@ -305,10 +305,11 @@ pub fn parse_contradiction_response(response: &str) -> Option<String> {
 
 /// Ollama の /api/embed エンドポイントを呼び出してembeddingを返す。
 /// Ollamaが起動していない場合は None を返す（非ブロッキング）。
+/// `truncate: true` により、モデルのコンテキスト長を超える入力は自動で切り詰められる。
 pub fn embed_with_ollama(model: &str, text: &str) -> Option<Vec<f32>> {
     let url = "http://localhost:11434/api/embed";
     let body = format!(
-        r#"{{"model":"{}","input":"{}"}}"#,
+        r#"{{"model":"{}","input":"{}","truncate":true}}"#,
         model,
         text.replace('\\', "\\\\")
             .replace('"', "\\\"")

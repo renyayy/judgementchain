@@ -83,7 +83,7 @@ export function useVault() {
 
   const getMarginAnnotations = useCallback(async (path: string): Promise<MarginAnnotation[]> => {
     try {
-      return await invoke<MarginAnnotation[]>("get_similar_notes_for_margin", { path });
+      return await invoke<MarginAnnotation[]>("get_margin_annotations", { path });
     } catch (e) {
       notify(`マージン注釈の取得に失敗しました: ${e}`, "warning");
       return [];

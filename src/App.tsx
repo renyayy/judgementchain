@@ -17,6 +17,7 @@ import { useAppMenu } from "./hooks/useAppMenu";
 import { useGit } from "./hooks/useGit";
 import { useAI } from "./hooks/useAI";
 import { useSettings } from "./hooks/useSettings";
+import { useGraphAnalysis } from "./hooks/useGraphAnalysis";
 import { isViewableFile } from "./components/FileViewer";
 import type { EditorTab, MarginAnnotation } from "./types";
 import "./App.css";
@@ -49,6 +50,7 @@ function App() {
 
   const { settings, updateSettings } = useSettings();
   const { modelStatus, messages, isGenerating, loadModel, generateText, clearMessages } = useAI();
+  const graphAnalysis = useGraphAnalysis();
   const { status: gitStatus, commits: gitCommits, refresh: refreshGit, stage: gitStage, unstage: gitUnstage, discard: gitDiscard, commit: gitCommit, initRepo: gitInit } = useGit();
   const [folderExpandSignal, setFolderExpandSignal] = useState<boolean | null>(null);
 
@@ -565,6 +567,7 @@ function App() {
               <GraphPanel
                 vaultPath={vaultPath}
                 onOpenFile={handleSelectFile}
+                graphAnalysis={graphAnalysis}
               />
             )}
             {rightPanel === "margin" && (

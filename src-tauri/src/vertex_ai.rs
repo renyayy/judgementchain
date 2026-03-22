@@ -215,6 +215,79 @@ pub async fn call_gemini(
     Ok(acc)
 }
 
+/// Gemini APIを呼び出してプレーンテキストを返す（JSON強制なし）。
+/// 週次サマリや矛盾検出など、自由文生成に使う。
+pub async fn call_gemini_text(
+    access_token: &str,
+    project_id: &str,
+    model: &str,
+    prompt: &str,
+    max_output_tokens: u32,
+) -> Result<String, String> {
+    let url = format!(
+        "https://aiplatform.googleapis.com/v1/projects/{project_id}/locations/global/publishers/google/models/{model}:streamGenerateContent",
+        project_id = project_id,
+        model = model,
+    );
+
+    let body = serde_json::json!({
+        "contents": [{
+            "role": "user",
+            "parts": [{ "text": prompt }]
+        }],
+        "generationConfig": {
+            "temperature": 0.7,
+            "maxOutputTokens": max_output_tokens
+        }
+    });
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(&url)
+        .bearer_auth(access_token)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("Gemini API HTTPエラー: {}", e))?;
+
+    let status = resp.status();
+    let body_text = resp.text().await.unwrap_or_default();
+
+    if !status.is_success() {
+        return Err(format!("Gemini API失敗 ({}): {}", status, body_text));
+    }
+
+    // streamGenerateContent のレスポンスをパース
+    let trimmed = body_text.trim_start();
+    let mut acc = String::new();
+
+    if trimmed.starts_with('[') {
+        let chunks: Vec<GeminiResponse> = serde_json::from_str(&body_text)
+            .map_err(|e| format!("Geminiレスポンスパースエラー: {} / {}", e, body_text))?;
+        for chunk in chunks {
+            if let Some(candidate) = chunk.candidates.into_iter().next() {
+                for part in candidate.content.parts {
+                    acc.push_str(&part.text);
+                }
+            }
+        }
+    } else {
+        let gemini_resp: GeminiResponse = serde_json::from_str(&body_text)
+            .map_err(|e| format!("Geminiレスポンスパースエラー: {} / {}", e, body_text))?;
+        for candidate in gemini_resp.candidates {
+            for part in candidate.content.parts {
+                acc.push_str(&part.text);
+            }
+        }
+    }
+
+    if acc.is_empty() {
+        return Err("Geminiからのレスポンスが空です".to_string());
+    }
+
+    Ok(acc)
+}
+
 /// LLM応答からJSONを抽出し、trailing commaを除去して返す
 pub fn clean_json_response_owned(text: &str) -> String {
     let cleaned = clean_json_response(text);

@@ -2,8 +2,8 @@ import { useEffect, useRef, useCallback, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import cytoscape from "cytoscape";
 import dagre from "cytoscape-dagre";
-import { useGraphAnalysis } from "../hooks/useGraphAnalysis";
 import type { GraphData } from "../types";
+import type { useGraphAnalysis } from "../hooks/useGraphAnalysis";
 
 cytoscape.use(dagre);
 
@@ -40,6 +40,7 @@ function filterByMode(
 interface GraphPanelProps {
   vaultPath: string;
   onOpenFile: (path: string) => void;
+  graphAnalysis: ReturnType<typeof useGraphAnalysis>;
 }
 
 interface TooltipState {
@@ -56,8 +57,8 @@ interface VertexSettings {
   model: string;
 }
 
-export default function GraphPanel({ vaultPath, onOpenFile }: GraphPanelProps) {
-  const { status, data, error, analyze, reset } = useGraphAnalysis();
+export default function GraphPanel({ vaultPath, onOpenFile, graphAnalysis }: GraphPanelProps) {
+  const { status, data, error, analyze, reset } = graphAnalysis;
   const cyRef = useRef<HTMLDivElement>(null);
   const cyInstance = useRef<cytoscape.Core | null>(null);
   const [tooltip, setTooltip] = useState<TooltipState>({ visible: false, text: "", x: 0, y: 0 });
@@ -310,6 +311,7 @@ export default function GraphPanel({ vaultPath, onOpenFile }: GraphPanelProps) {
   useEffect(() => {
     return () => {
       cyInstance.current?.destroy();
+      cyInstance.current = null;
     };
   }, []);
 

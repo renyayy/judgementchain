@@ -208,13 +208,14 @@ impl Database {
         }
     }
 
-    pub fn find_similar(&self, embedding: &[f32], top_k: usize, exclude_path: &str) -> Result<Vec<(String, f32)>, String> {
+    pub fn find_similar(&self, embedding: &[f32], top_k: usize, exclude_path: &str, vault_prefix: &str) -> Result<Vec<(String, f32)>, String> {
         let conn = self.conn.lock().map_err(|e| format!("Lock error: {}", e))?;
+        let prefix_pattern = format!("{}%", vault_prefix);
         let mut stmt = conn.prepare(
-            "SELECT file_path, embedding FROM note_embeddings WHERE file_path != ?1"
+            "SELECT file_path, embedding FROM note_embeddings WHERE file_path != ?1 AND file_path LIKE ?2"
         ).map_err(|e| format!("Failed to prepare statement: {}", e))?;
 
-        let mut similarities: Vec<(String, f32)> = stmt.query_map(params![exclude_path], |row| {
+        let mut similarities: Vec<(String, f32)> = stmt.query_map(params![exclude_path, prefix_pattern], |row| {
             let path: String = row.get(0)?;
             let bytes: Vec<u8> = row.get(1)?;
             Ok((path, bytes))
@@ -306,15 +307,16 @@ impl Database {
     }
 
     /// 今週の活動ログを集計（ファイルごとのアクセス回数）
-    pub fn get_week_activity(&self, week_start: i64) -> Result<Vec<(String, u32)>, String> {
+    pub fn get_week_activity(&self, week_start: i64, vault_prefix: &str) -> Result<Vec<(String, u32)>, String> {
         let conn = self.conn.lock().map_err(|e| format!("Lock error: {}", e))?;
         let week_end = week_start + 604_800;
+        let prefix_pattern = format!("{}%", vault_prefix);
         let mut stmt = conn.prepare(
             "SELECT file_path, COUNT(*) as cnt FROM activity_log
-             WHERE timestamp >= ?1 AND timestamp < ?2
+             WHERE timestamp >= ?1 AND timestamp < ?2 AND file_path LIKE ?3
              GROUP BY file_path ORDER BY cnt DESC LIMIT 10",
         ).map_err(|e| format!("Failed to prepare statement: {}", e))?;
-        let rows = stmt.query_map(params![week_start, week_end], |row| {
+        let rows = stmt.query_map(params![week_start, week_end, prefix_pattern], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?))
         }).map_err(|e| format!("Failed to query week activity: {}", e))?
         .filter_map(|r| r.ok())

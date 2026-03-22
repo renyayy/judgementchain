@@ -5,6 +5,51 @@ use crate::config::Config;
 use crate::database::ActivityLog;
 use crate::vault::{FileEntry, NoteContent};
 
+/// バックエンドに応じてテキストを生成するヘルパー。
+/// - vertex / vertex_ai: Vertex AI (Gemini) API
+/// - それ以外: ローカル Candle モデル
+async fn generate_with_backend(
+    state: &State<'_, AppState>,
+    prompt: &str,
+    max_tokens: u32,
+) -> Result<String, String> {
+    let (backend, sa_json, project_id, model) = {
+        let config = state.config.read().map_err(|e| format!("Config lock error: {}", e))?;
+        (
+            config.ai.backend.clone(),
+            config.ai.vertex_ai_service_account_json.clone(),
+            config.ai.vertex_ai_project_id.clone(),
+            config.ai.vertex_ai_model.clone(),
+        )
+    };
+
+    if backend == "vertex" || backend == "vertex_ai" {
+        let token = crate::vertex_ai::get_access_token(&sa_json).await?;
+        crate::vertex_ai::call_gemini_text(&token, &project_id, &model, prompt, max_tokens).await
+    } else {
+        let candle_arc = std::sync::Arc::clone(&state.candle);
+        let prompt_owned = prompt.to_string();
+        tokio::task::spawn_blocking(move || {
+            let mut guard = candle_arc.lock().map_err(|e| format!("Lock error: {}", e))?;
+            let candle_state = guard.as_mut().ok_or("モデル未ロード")?;
+            candle_state.generate(&prompt_owned, max_tokens, |_| {})
+        })
+        .await
+        .map_err(|e| format!("Task error: {}", e))?
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct PluginManifest {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub description: Option<String>,
+    pub main: String, // e.g. "main.js"
+    pub capabilities: Option<Vec<String>>,
+    pub enabled: Option<bool>,
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct MarginAnnotation {
     pub id: String,
@@ -68,9 +113,13 @@ pub async fn save_file(path: String, content: String, state: State<'_, AppState>
     // Log activity
     let _ = state.db.log_activity(&full_path, "save", None);
 
-    // Store wikilinks
-    let wikilinks = crate::vault::extract_wikilinks(&content);
-    let _ = state.db.store_wikilinks(&full_path, &wikilinks);
+    // Store wikilinks (resolve link text to full paths for backlink queries)
+    let wikilinks_raw = crate::vault::extract_wikilinks(&content);
+    let wikilinks_resolved: Vec<String> = wikilinks_raw
+        .iter()
+        .filter_map(|link| crate::vault::resolve_wikilink(&vault_path, link))
+        .collect();
+    let _ = state.db.store_wikilinks(&full_path, &wikilinks_resolved);
 
     // Auto-commit if enabled
     {
@@ -164,7 +213,7 @@ pub async fn get_similar_notes_for_margin(path: String, state: State<'_, AppStat
         None => return Ok(vec![]),
     };
 
-    let similar = state.db.find_similar(&embedding, 5, &full_path)?;
+    let similar = state.db.find_similar(&embedding, 5, &full_path, &vault_path)?;
 
     let annotations = similar.into_iter()
         .filter(|(_, sim)| *sim >= threshold)
@@ -368,9 +417,14 @@ pub async fn log_activity(
 
 #[tauri::command]
 pub async fn get_margin_annotations(path: String, state: State<'_, AppState>) -> Result<Vec<MarginAnnotation>, String> {
+    let vault_path = {
+        let config = state.config.read().map_err(|e| format!("Config lock error: {}", e))?;
+        config.get_vault_path().to_string_lossy().to_string()
+    };
+
     // 1) 関連ノート（embedding 類似度）
     let embedding = state.db.get_embedding(&path)?.unwrap_or_default();
-    let similar = state.db.find_similar(&embedding, 3, &path)?;
+    let similar = state.db.find_similar(&embedding, 3, &path, &vault_path)?;
 
     let mut annotations: Vec<MarginAnnotation> = similar.into_iter()
         .enumerate()
@@ -410,12 +464,8 @@ pub async fn get_margin_annotations(path: String, state: State<'_, AppState>) ->
     }
 
     // 3) 論文リンク（BibTeX + keyword 類似度）
-    let vault_path = {
-        let config = state.config.read().map_err(|e| format!("Config lock error: {}", e))?;
-        config.get_vault_path()
-    };
     let note_content = std::fs::read_to_string(&path).unwrap_or_default();
-    let bib_files = crate::bibtex::find_bib_files(&vault_path);
+    let bib_files = crate::bibtex::find_bib_files(std::path::Path::new(&vault_path));
     let mut papers: Vec<(f32, String, String, Option<String>)> = vec![]; // (score, title, summary, key)
     for bib_path in bib_files {
         for entry in crate::bibtex::parse_bib_file(&bib_path) {
@@ -478,8 +528,13 @@ pub async fn get_weekly_summary(state: State<'_, AppState>) -> Result<Option<Str
 pub async fn generate_weekly_summary(state: State<'_, AppState>) -> Result<String, String> {
     let week_start = current_week_start();
 
-    // 週次活動を取得
-    let activity = state.db.get_week_activity(week_start)?;
+    let vault_path = {
+        let config = state.config.read().map_err(|e| format!("Config lock error: {}", e))?;
+        config.get_vault_path().to_string_lossy().to_string()
+    };
+
+    // 週次活動を取得（現在のVault内のみ）
+    let activity = state.db.get_week_activity(week_start, &vault_path)?;
     if activity.is_empty() {
         return Err("今週の活動記録がありません".to_string());
     }
@@ -528,15 +583,15 @@ pub async fn detect_contradictions(
     // 既存キャッシュを無効化（再チェック）
     state.db.clear_contradictions(&path)?;
 
-    // 類似ノートを取得（top 3）
-    let embedding = state.db.get_embedding(&path)?.unwrap_or_default();
-    let similar = state.db.find_similar(&embedding, 3, &path)?;
-    if similar.is_empty() {
-        return Ok(vec![]);
-    }
-
-    // 各類似ノートと矛盾チェック
     let mut results: Vec<MarginAnnotation> = vec![];
+
+    // 他ノートとの矛盾検出
+    let vault_path = {
+        let config = state.config.read().map_err(|e| format!("Config lock error: {}", e))?;
+        config.get_vault_path().to_string_lossy().to_string()
+    };
+    let embedding = state.db.get_embedding(&path)?.unwrap_or_default();
+    let similar = state.db.find_similar(&embedding, 3, &path, &vault_path)?;
 
     for (similar_path, _) in similar {
         let other_content = match std::fs::read_to_string(&similar_path) {
@@ -545,16 +600,8 @@ pub async fn detect_contradictions(
         };
 
         let prompt = crate::ai::build_contradiction_prompt(&current_content, &other_content);
-        let candle_arc = std::sync::Arc::clone(&state.candle);
 
-        // Candle 推論（spawn_blocking でノンブロッキング）
-        let response = tokio::task::spawn_blocking(move || {
-            let mut guard = candle_arc.lock().map_err(|e| format!("Lock error: {}", e))?;
-            let candle_state = guard.as_mut().ok_or("モデル未ロード")?;
-            candle_state.generate(&prompt, 128, |_| {})
-        })
-        .await
-        .map_err(|e| format!("Task error: {}", e))??;
+        let response = generate_with_backend(&state, &prompt, 128).await?;
 
         if let Some(description) = crate::ai::parse_contradiction_response(&response) {
             // キャッシュに保存
@@ -582,11 +629,15 @@ pub async fn detect_contradictions(
 #[tauri::command]
 pub async fn get_related_notes(path: String, limit: Option<usize>, state: State<'_, AppState>) -> Result<Vec<SimilarNote>, String> {
     let top_k = limit.unwrap_or(5);
+    let vault_path = {
+        let config = state.config.read().map_err(|e| format!("Config lock error: {}", e))?;
+        config.get_vault_path().to_string_lossy().to_string()
+    };
 
     // Try to get the embedding for this note
     let embedding = state.db.get_embedding(&path)?.unwrap_or_default();
 
-    let similar = state.db.find_similar(&embedding, top_k, &path)?;
+    let similar = state.db.find_similar(&embedding, top_k, &path, &vault_path)?;
 
     let notes: Vec<SimilarNote> = similar.into_iter()
         .map(|(file_path, similarity)| {
